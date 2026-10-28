@@ -317,6 +317,7 @@ model LearningPath {
   updatedAt            DateTime           @updatedAt @map("updated_at")
 
   items                LearningPathItem[]
+  roadmapVersions      RoadmapVersion[]
 
   @@map("learning_paths")
 }
@@ -741,3 +742,51 @@ model RecommendationLog {
 
   @@map("recommendation_logs")
 }
+
+model RoadmapVersion {
+  id               String       @id @default(uuid())
+  learningPathId   String       @map("learning_path_id")
+  learningPath     LearningPath @relation(fields: [learningPathId], references: [id], onDelete: Cascade)
+  userId           String       @map("user_id")
+  versionNumber    Int          @map("version_number")
+  snapshot         Json         // Immutable complete JSON snapshot of roadmap and items
+  triggerSource    String?      @map("trigger_source") // INITIAL, MINI, FULL, LONG_TERM, MANUAL, DETERMINISTIC
+  changeReason     String?      @map("change_reason")
+  structuredDiff   Json?        @map("structured_diff") // Added, removed, reordered, difficulty changes
+  modelMetadata    Json?        @map("model_metadata")
+  createdAt        DateTime     @default(now()) @map("created_at")
+
+  @@unique([learningPathId, versionNumber])
+  @@index([userId, versionNumber])
+  @@map("roadmap_versions")
+}
+
+model AuditLog {
+  id             String    @id @default(uuid())
+  actorId        String?   @map("actor_id")
+  actorEmail     String    @map("actor_email")
+  action         String    // USER_CREATE, USER_UPDATE, USER_STATUS_CHANGE, USER_DELETE, SETTING_UPDATE, PASSWORD_CHANGE, BULK_ACTION
+  entityType     String    @map("entity_type") // USER, ROADMAP, SYSTEM, SETTING
+  entityId       String?   @map("entity_id")
+  details        Json?
+  outcome        String    @default("SUCCESS") // SUCCESS, FAILURE
+  ipAddress      String?   @map("ip_address")
+  userAgent      String?   @map("user_agent")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([action, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+model SystemSetting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       Json
+  description String?
+  updatedBy   String?  @map("updated_by")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
+

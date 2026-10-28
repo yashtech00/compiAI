@@ -1,5 +1,6 @@
 import { Type } from '@google/genai';
 import { AiService } from '../ai/ai.service.js';
+import { ResilientAiProvider } from '../ai/resilient-ai-provider.js';
 import { config } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
 import { validateAndSortMilestones } from './path-synthesis.contract.js';
@@ -15,17 +16,23 @@ export class PathSynthesisService {
     experienceLevel = 'BEGINNER',
     dailyMinutes = 15,
     knownSkills = [],
-    existingMastery = {}
+    existingMastery = {},
+    userId = null
   }) {
-    // 1. If Gemini AI is configured, try live AI synthesis
-    if (AiService.isRealProviderConfigured()) {
+    if (!goalTitle || typeof goalTitle !== 'string' || goalTitle.trim().length < 2) {
+      throw new Error('A valid goalTitle of at least 2 characters is required for path synthesis.');
+    }
+
+    // 1. If AI provider is available, try live AI synthesis through ResilientAiProvider
+    if (ResilientAiProvider.isProviderAvailable()) {
       try {
         const aiProposal = await this._callGeminiPathSynthesizer({
           goalTitle,
           targetRole,
           experienceLevel,
           dailyMinutes,
-          knownSkills
+          knownSkills,
+          userId
         });
 
         if (aiProposal) {
@@ -34,6 +41,8 @@ export class PathSynthesisService {
           return {
             ...validated,
             source: 'gemini_path_synthesizer',
+            generationSource: 'AI_SYNTHESIZED',
+            isAiGenerated: true,
             model: config.geminiModel
           };
         }
@@ -55,6 +64,8 @@ export class PathSynthesisService {
     return {
       ...validated,
       source: 'goal_adaptive_scaffold_synthesizer',
+      generationSource: 'DETERMINISTIC_SCAFFOLD',
+      isAiGenerated: false,
       model: 'deterministic-v1'
     };
   }
@@ -67,11 +78,9 @@ export class PathSynthesisService {
     targetRole,
     experienceLevel,
     dailyMinutes,
-    knownSkills
+    knownSkills,
+    userId = 'system'
   }) {
-    const ai = AiService.getClient();
-    if (!ai) return null;
-
     const prompt = `You are a Principal Curriculum Architect and Technical Mentor for Software Engineers.
 A software engineering learner has defined their specific career or learning goal.
 
@@ -95,63 +104,62 @@ Requirements:
 6. Calibrate for a learner spending ${dailyMinutes} minutes/day.
 7. Return strictly valid JSON matching the schema.`;
 
-    const response = await Promise.race([
-      ai.models.generateContent({
-        model: config.geminiModel,
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
+    const schema = {
+      type: Type.OBJECT,
+      properties: {
+        pathTitle: { type: Type.STRING },
+        targetRole: { type: Type.STRING },
+        pedagogicalApproach: { type: Type.STRING },
+        estimatedTotalWeeks: { type: Type.INTEGER },
+        milestones: {
+          type: Type.ARRAY,
+          items: {
             type: Type.OBJECT,
             properties: {
-              pathTitle: { type: Type.STRING },
-              targetRole: { type: Type.STRING },
-              pedagogicalApproach: { type: Type.STRING },
-              estimatedTotalWeeks: { type: Type.INTEGER },
-              milestones: {
+              topicSlug: { type: Type.STRING },
+              title: { type: Type.STRING },
+              domainSkillSlug: { type: Type.STRING },
+              difficulty: {
+                type: Type.STRING,
+                enum: ['BEGINNER', 'INTERMEDIATE', 'ADVANCED']
+              },
+              measurableObjective: { type: Type.STRING },
+              estimatedSessions: { type: Type.INTEGER },
+              prerequisiteTopicSlugs: {
                 type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    topicSlug: { type: Type.STRING },
-                    title: { type: Type.STRING },
-                    domainSkillSlug: { type: Type.STRING },
-                    difficulty: {
-                      type: Type.STRING,
-                      enum: ['BEGINNER', 'INTERMEDIATE', 'ADVANCED']
-                    },
-                    measurableObjective: { type: Type.STRING },
-                    estimatedSessions: { type: Type.INTEGER },
-                    prerequisiteTopicSlugs: {
-                      type: Type.ARRAY,
-                      items: { type: Type.STRING }
-                    },
-                    whyThisMatters: { type: Type.STRING }
-                  },
-                  required: [
-                    'topicSlug',
-                    'title',
-                    'domainSkillSlug',
-                    'difficulty',
-                    'measurableObjective',
-                    'estimatedSessions',
-                    'prerequisiteTopicSlugs',
-                    'whyThisMatters'
-                  ]
-                }
-              }
+                items: { type: Type.STRING }
+              },
+              whyThisMatters: { type: Type.STRING }
             },
-            required: ['pathTitle', 'targetRole', 'pedagogicalApproach', 'estimatedTotalWeeks', 'milestones']
+            required: [
+              'topicSlug',
+              'title',
+              'domainSkillSlug',
+              'difficulty',
+              'measurableObjective',
+              'estimatedSessions',
+              'prerequisiteTopicSlugs',
+              'whyThisMatters'
+            ]
           }
         }
-      }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('GEMINI_TIMEOUT')), Math.min(config.geminiTimeoutMs || 3500, 4000))
-      )
-    ]);
+      },
+      required: ['pathTitle', 'targetRole', 'pedagogicalApproach', 'estimatedTotalWeeks', 'milestones']
+    };
 
-    const parsed = JSON.parse(response.text || '{}');
-    return parsed;
+    const result = await ResilientAiProvider.generateJson({
+      prompt,
+      configOptions: {
+        responseMimeType: 'application/json',
+        responseSchema: schema
+      },
+      requestType: 'path_synthesis',
+      userId,
+      maxRetries: 2,
+      timeoutMs: config.geminiTimeoutMs || 3500
+    });
+
+    return result.data;
   }
 
   /**

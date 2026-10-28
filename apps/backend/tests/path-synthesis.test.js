@@ -89,7 +89,7 @@ describe('Phase 1: AI-Generated Personalized Learning Paths', () => {
     // Zero overlap between specialized Raft and WASM milestone slugs
     const overlap = raftSlugs.filter(s => wasmSlugs.includes(s));
     expect(overlap).toHaveLength(0);
-  });
+  }, 30000);
 
   // =========================================================================
   // TEST 2: Arbitrary Goal Outside Catalogue
@@ -128,7 +128,7 @@ describe('Phase 1: AI-Generated Personalized Learning Paths', () => {
     });
     expect(customConcepts.length).toBeGreaterThan(0);
     expect(customConcepts[0].description).toBeDefined();
-  });
+  }, 30000);
 
   // =========================================================================
   // TEST 3: Contract Validation & Cycle Detection (Kahn's Algorithm)

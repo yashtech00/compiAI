@@ -6,18 +6,38 @@ import { z } from 'zod';
 
 const router = Router();
 
+import { MasterPathRegistry } from '../../curriculum/master-paths/master-path.registry.js';
+
 // GET /api/v1/roles - Public or authenticated
 router.get('/roles', async (req, res, next) => {
   try {
-    const roles = await prisma.targetRole.findMany({
-      where: { status: 'ACTIVE' },
-      include: {
-        roleSkills: {
-          include: { skill: true }
-        }
-      },
-      orderBy: { name: 'asc' }
-    });
+    let roles = [];
+    try {
+      roles = await prisma.targetRole.findMany({
+        where: { status: 'ACTIVE' },
+        include: {
+          roleSkills: {
+            include: { skill: true }
+          }
+        },
+        orderBy: { name: 'asc' }
+      });
+    } catch (dbErr) {
+      // Fallback if DB is temporarily unreachable
+      roles = [];
+    }
+
+    if (!roles || roles.length === 0) {
+      const supported = MasterPathRegistry.listSupportedGoals();
+      roles = supported.map(g => ({
+        id: g.goalId,
+        slug: g.goalId,
+        name: g.title,
+        description: g.description,
+        status: 'ACTIVE'
+      }));
+    }
+
     return successResponse(res, { roles }, 'Target roles retrieved');
   } catch (error) {
     next(error);

@@ -76,42 +76,9 @@ async function main() {
     });
   }
 
-  // 3. Admin Account
-  const adminEmail = process.env.ADMIN_EMAIL || 'admin@companion.ai';
-  const adminPassword = process.env.ADMIN_PASSWORD || 'AdminSecurePass123!';
-  const adminName = process.env.ADMIN_NAME || 'System Administrator';
-
-  console.log(`Seeding admin account: ${adminEmail}...`);
-  const adminPasswordHash = await bcrypt.hash(adminPassword, 10);
-  const adminUser = await prisma.user.upsert({
-    where: { email: adminEmail },
-    update: {
-      passwordHash: adminPasswordHash,
-      role: 'ADMIN',
-      status: 'ACTIVE'
-    },
-    create: {
-      email: adminEmail,
-      passwordHash: adminPasswordHash,
-      role: 'ADMIN',
-      status: 'ACTIVE',
-      profile: {
-        create: {
-          displayName: adminName,
-          experienceLevel: 'ADVANCED',
-          dailyMinutes: 30,
-          onboardingCompleted: true,
-          onboardingStep: 5
-        }
-      },
-      streak: {
-        create: {
-          currentStreak: 5,
-          longestStreak: 12
-        }
-      }
-    }
-  });
+  // 3. Admin Account & System Settings
+  const { seedAdmin } = await import('./seed-admin.js');
+  await seedAdmin();
 
   // 4. Target Roles
   console.log('Seeding target roles...');

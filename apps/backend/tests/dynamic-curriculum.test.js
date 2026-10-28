@@ -123,7 +123,7 @@ describe('Phase 4: Complete Dynamic Curriculum Migration & Regression Test Suite
       where: { isCustom: false, status: 'ACTIVE' },
       include: {
         skill: true,
-        lessons: { where: { status: 'PUBLISHED' }, take: 1 }
+        lessons: { where: { status: 'PUBLISHED', userId: null }, take: 1 }
       }
     });
 

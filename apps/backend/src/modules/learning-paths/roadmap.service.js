@@ -103,7 +103,8 @@ export class RoadmapService {
         experienceLevel,
         dailyMinutes,
         knownSkills: knownSkillSlugs,
-        existingMastery: Object.fromEntries(masteryMap)
+        existingMastery: Object.fromEntries(masteryMap),
+        userId
       });
     } catch (err) {
       logger.error(`Personalized path synthesis error for user ${userId}: ${err.message}`);
@@ -270,8 +271,34 @@ export class RoadmapService {
       });
     }
 
-    // 6. Persist LearningPath in PostgreSQL transaction with versioning
+    // 6. Persist LearningPath in PostgreSQL transaction with versioning and distributed lock
     const roadmap = await prisma.$transaction(async (tx) => {
+      // Distributed advisory transaction lock serialized per userId across cluster instances
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}));`;
+
+      // Concurrent race protection: re-check if an active path was created while acquiring lock
+      if (!options.force) {
+        const existingActive = await tx.learningPath.findFirst({
+          where: { userId, status: 'ACTIVE' },
+          include: {
+            items: {
+              include: {
+                concept: {
+                  include: {
+                    skill: true,
+                    lessons: { where: { status: 'PUBLISHED' }, take: 1 }
+                  }
+                }
+              },
+              orderBy: { sequenceOrder: 'asc' }
+            }
+          }
+        });
+        if (existingActive && existingActive.items?.length > 0) {
+          return existingActive;
+        }
+      }
+
       // Find latest path to determine next version
       const latestPath = await tx.learningPath.findFirst({
         where: { userId },
@@ -305,6 +332,8 @@ export class RoadmapService {
           triggerReason: 'ONBOARDING_PERSONALIZED_PATH',
           evidenceSummary: {
             source: synthesized.source,
+            generationSource: synthesized.generationSource || (synthesized.isAiGenerated ? 'AI_SYNTHESIZED' : 'DETERMINISTIC_SCAFFOLD'),
+            isAiGenerated: !!synthesized.isAiGenerated,
             model: synthesized.model,
             estimatedTotalWeeks: synthesized.estimatedTotalWeeks,
             pedagogicalApproach: synthesized.pedagogicalApproach
@@ -329,6 +358,16 @@ export class RoadmapService {
           }
         }
       });
+
+      // Record immutable RoadmapVersion snapshot
+      await RoadmapService._recordRoadmapVersion(
+        tx,
+        newPath,
+        newPath.analysisType || 'INITIAL_AI_SYNTHESIS',
+        newPath.triggerReason || 'Initial learning path generated',
+        { action: 'INITIAL_CREATION', topicCount: newPath.items?.length || 0 },
+        newPath.evidenceSummary || {}
+      );
 
       return newPath;
     });
@@ -501,10 +540,66 @@ export class RoadmapService {
         }
       });
 
+      // Record immutable RoadmapVersion snapshot with structured change diff
+      await RoadmapService._recordRoadmapVersion(
+        tx,
+        created,
+        analysisType || 'ADAPTIVE_REVISION',
+        triggerReason || 'Adaptive progression update',
+        {
+          action: 'PATH_REVISION',
+          previousVersion: activePath.version,
+          newVersion,
+          proposedChanges: proposedPathChanges
+        },
+        evidenceSummary || {}
+      );
+
       return created;
     });
 
     return updatedPath;
+  }
+
+  /**
+   * Helper to write an immutable RoadmapVersion snapshot
+   */
+  static async _recordRoadmapVersion(tx, path, triggerSource, changeReason, structuredDiff = {}, modelMetadata = {}) {
+    try {
+      await tx.roadmapVersion.create({
+        data: {
+          learningPathId: path.id,
+          userId: path.userId,
+          versionNumber: path.version,
+          snapshot: {
+            id: path.id,
+            title: path.title,
+            targetGoal: path.targetGoal,
+            pedagogicalApproach: path.pedagogicalApproach,
+            status: path.status,
+            version: path.version,
+            items: (path.items || []).map(i => ({
+              id: i.id,
+              conceptId: i.conceptId,
+              conceptName: i.concept?.name || i.title,
+              milestoneId: i.milestoneId,
+              title: i.title,
+              targetOutcome: i.targetOutcome,
+              sequenceOrder: i.sequenceOrder,
+              status: i.status,
+              reason: i.reason,
+              completedAt: i.completedAt
+            }))
+          },
+          triggerSource,
+          changeReason,
+          structuredDiff,
+          modelMetadata
+        }
+      });
+    } catch (err) {
+      logger.warn(`Failed to record RoadmapVersion snapshot: ${err.message}`);
+    }
   }
 
   /**

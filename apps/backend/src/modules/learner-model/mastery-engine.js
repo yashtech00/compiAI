@@ -191,4 +191,128 @@ export class MasteryEngine {
       reason: `Explain-back synthesis scored ${safeScore}%.`
     };
   }
+
+  /**
+   * Evaluates multi-dimensional simulation evidence across 4 dimensions:
+   * Diagnosis (30%), Investigation (25%), Implementation (25%), Verification (20%).
+   * 
+   * Enforces critical-failure overrides, prerequisite satisfaction, and hint ceilings.
+   */
+  static evaluateMultiDimensionalOutcome({
+    currentMastery = 0,
+    dimensions = {},
+    weights = {
+      diagnosis: 0.30,
+      investigation: 0.25,
+      implementation: 0.25,
+      verification: 0.20
+    },
+    criticalFailures = [],
+    hintsUsed = 0,
+    prerequisitesSatisfied = true,
+    isTransferAssessment = false,
+    threshold = 80
+  }) {
+    const safeCurrent = Math.max(0, Math.min(100, Number(currentMastery) || 0));
+
+    // 1. Validate Dimension Scores
+    const dimensionKeys = ['diagnosis', 'investigation', 'implementation', 'verification'];
+    const validatedDimensions = {};
+    const missingDimensions = [];
+
+    for (const key of dimensionKeys) {
+      const val = dimensions[key];
+      if (val === undefined || val === null) {
+        missingDimensions.push(key);
+      } else {
+        const num = Number(val);
+        if (isNaN(num) || num < 0 || num > 100) {
+          throw new Error(`Invalid dimension score for '${key}': must be a number between 0 and 100`);
+        }
+        validatedDimensions[key] = Math.round(num * 10) / 10;
+      }
+    }
+
+    if (missingDimensions.length === dimensionKeys.length) {
+      throw new Error('Multi-dimensional evaluation requires at least one evaluated dimension');
+    }
+
+    // 2. Normalize weights over available dimensions
+    let totalWeight = 0;
+    for (const key of dimensionKeys) {
+      if (validatedDimensions[key] !== undefined) {
+        totalWeight += (weights[key] || 0);
+      }
+    }
+
+    if (totalWeight <= 0) totalWeight = 1;
+
+    let aggregateScore = 0;
+    for (const key of dimensionKeys) {
+      if (validatedDimensions[key] !== undefined) {
+        const normalizedWeight = (weights[key] || 0) / totalWeight;
+        aggregateScore += validatedDimensions[key] * normalizedWeight;
+      }
+    }
+    aggregateScore = Math.round(aggregateScore * 10) / 10;
+
+    // 3. Evaluate Critical Failures
+    const isCriticalFailure = Array.isArray(criticalFailures) && criticalFailures.length > 0;
+    const criticalFailureReasons = isCriticalFailure 
+      ? criticalFailures.map(cf => typeof cf === 'string' ? cf : (cf.reason || cf.code || 'Unspecified critical failure'))
+      : [];
+
+    let finalScore = aggregateScore;
+    let isMastered = false;
+    let actionType = 'CONTINUE';
+    let rationale = '';
+
+    if (isCriticalFailure) {
+      // Critical failure strictly overrides high aggregate score
+      finalScore = Math.min(45, aggregateScore);
+      isMastered = false;
+      actionType = 'REMEDIATE';
+      rationale = `Critical failure detected: ${criticalFailureReasons.join('; ')}. Mastery blocked regardless of aggregate score (${aggregateScore}% -> capped at ${finalScore}%).`;
+    } else if (!prerequisitesSatisfied) {
+      isMastered = false;
+      actionType = 'PREREQUISITE';
+      rationale = `Prerequisite skills not satisfied. Dependent skill mastery is gated.`;
+    } else if (hintsUsed > 2) {
+      finalScore = Math.min(60, aggregateScore);
+      isMastered = false;
+      actionType = 'REINFORCE';
+      rationale = `Excessive hint dependence (${hintsUsed} hints). Unassisted demonstration required for mastery.`;
+    } else if (validatedDimensions.verification !== undefined && validatedDimensions.verification < 50) {
+      isMastered = false;
+      actionType = 'REINFORCE';
+      rationale = `Verification score (${validatedDimensions.verification}%) below minimum required 50%. Solution has unverified edge cases.`;
+    } else if (aggregateScore >= threshold) {
+      isMastered = true;
+      actionType = 'ADVANCE';
+      rationale = `Demonstrated solid multi-dimensional competence (${aggregateScore}% >= ${threshold}%).`;
+    } else {
+      isMastered = false;
+      actionType = aggregateScore < 60 ? 'REMEDIATE' : 'REINFORCE';
+      rationale = `Score of ${aggregateScore}% is below mastery threshold of ${threshold}%. Targeted practice recommended.`;
+    }
+
+    const calculatedMastery = Math.max(0, Math.min(100, Math.round(finalScore * 10) / 10));
+    const delta = Math.round((calculatedMastery - safeCurrent) * 10) / 10;
+
+    return {
+      overallScore: calculatedMastery,
+      rawAggregateScore: aggregateScore,
+      dimensionScores: validatedDimensions,
+      missingDimensions,
+      isMastered,
+      isCriticalFailure,
+      criticalFailureReasons,
+      prerequisitesSatisfied,
+      isTransferAssessment,
+      masteryDelta: delta,
+      actionType,
+      rationale
+    };
+  }
 }
+
