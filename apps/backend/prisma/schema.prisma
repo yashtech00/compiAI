@@ -1,0 +1,722 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String               @id @default(uuid())
+  email               String               @unique
+  passwordHash        String               @map("password_hash")
+  authProvider        String               @default("LOCAL") @map("auth_provider")
+  role                String               @default("LEARNER") // LEARNER, ADMIN
+  status              String               @default("ACTIVE") // ACTIVE, SUSPENDED
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+
+  profile             UserProfile?
+  learningGoals       LearningGoal[]
+  userSkills          UserSkill[]
+  userConcepts        UserConcept[]
+  assessmentAttempts  AssessmentAttempt[]
+  learningPaths       LearningPath[]
+  learningSessions    LearningSession[]
+  quizAttempts        QuizAttempt[]
+  codeSubmissions     CodeSubmission[]
+  explainBackAttempts ExplainBackAttempt[]
+  recallSchedules     RecallSchedule[]
+  recallAttempts      RecallAttempt[]
+  aiConversations     AiConversation[]
+  learningActivities  LearningActivity[]
+  streak              Streak?
+  userAchievements    UserAchievement[]
+  xpTransactions      XpTransaction[]
+  notifications       Notification[]
+  subscriptions       Subscription[]
+  payments            Payment[]
+  recommendationLogs  RecommendationLog[]
+
+  @@map("users")
+}
+
+model UserProfile {
+  id                  String    @id @default(uuid())
+  userId              String    @unique @map("user_id")
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  displayName         String    @map("display_name")
+  experienceLevel     String    @default("BEGINNER") @map("experience_level")
+  dailyMinutes        Int       @default(15) @map("daily_minutes")
+  timezone            String    @default("UTC")
+  avatarUrl           String?   @map("avatar_url")
+  onboardingCompleted          Boolean   @default(false) @map("onboarding_completed")
+  onboardingStep               Int       @default(1) @map("onboarding_step")
+  lastMiniAnalysisSessionCount Int       @default(0) @map("last_mini_analysis_session_count")
+  lastFullReviewActiveDays     Int       @default(0) @map("last_full_review_active_days")
+  lastLongTermActiveDays       Int       @default(0) @map("last_long_term_active_days")
+  createdAt                    DateTime  @default(now()) @map("created_at")
+  updatedAt                    DateTime  @updatedAt @map("updated_at")
+
+  @@map("user_profiles")
+}
+
+model TargetRole {
+  id            String         @id @default(uuid())
+  name          String         @unique
+  slug          String         @unique
+  description   String
+  status        String         @default("ACTIVE")
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  learningGoals LearningGoal[]
+  roleSkills    RoleSkill[]
+
+  @@map("target_roles")
+}
+
+model LearningGoal {
+  id              String         @id @default(uuid())
+  userId          String         @map("user_id")
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  targetRoleId    String?        @map("target_role_id")
+  targetRole      TargetRole?    @relation(fields: [targetRoleId], references: [id])
+  title           String
+  status          String         @default("ACTIVE")
+  targetReadiness Int            @default(80) @map("target_readiness")
+  startedAt       DateTime       @default(now()) @map("started_at")
+  targetDate      DateTime?      @map("target_date")
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  learningPaths   LearningPath[]
+
+  @@map("learning_goals")
+}
+
+model Skill {
+  id              String               @id @default(uuid())
+  parentSkillId   String?              @map("parent_skill_id")
+  parentSkill     Skill?               @relation("SkillHierarchy", fields: [parentSkillId], references: [id])
+  childSkills     Skill[]              @relation("SkillHierarchy")
+  name            String               @unique
+  slug            String               @unique
+  description     String
+  category        String
+  difficulty      Int                  @default(1)
+  icon            String?
+  createdAt       DateTime             @default(now()) @map("created_at")
+
+  roleSkills      RoleSkill[]
+  prerequisites   SkillPrerequisite[]  @relation("SkillPrereqs")
+  prerequisiteFor SkillPrerequisite[]  @relation("PrereqForSkills")
+  concepts        Concept[]
+  userSkills      UserSkill[]
+  assessments     Assessment[]
+
+  @@map("skills")
+}
+
+model SkillPrerequisite {
+  id                   String   @id @default(uuid())
+  skillId              String   @map("skill_id")
+  skill                Skill    @relation("SkillPrereqs", fields: [skillId], references: [id], onDelete: Cascade)
+  prerequisiteSkillId  String   @map("prerequisite_skill_id")
+  prerequisiteSkill    Skill    @relation("PrereqForSkills", fields: [prerequisiteSkillId], references: [id], onDelete: Cascade)
+  strength             Int      @default(1)
+
+  @@unique([skillId, prerequisiteSkillId])
+  @@map("skill_prerequisites")
+}
+
+model RoleSkill {
+  id            String     @id @default(uuid())
+  targetRoleId  String     @map("target_role_id")
+  targetRole    TargetRole @relation(fields: [targetRoleId], references: [id], onDelete: Cascade)
+  skillId       String     @map("skill_id")
+  skill         Skill      @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  requiredLevel Int        @default(70) @map("required_level")
+  importance    Int        @default(3)
+
+  @@unique([targetRoleId, skillId])
+  @@map("role_skills")
+}
+
+model Concept {
+  id                   String                @id @default(uuid())
+  skillId              String                @map("skill_id")
+  skill                Skill                 @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  name                 String
+  slug                 String                @unique
+  description          String
+  difficulty           String                @default("BEGINNER")
+  status               String                @default("ACTIVE")
+  orderIndex           Int                   @default(0) @map("order_index")
+  createdAt            DateTime              @default(now()) @map("created_at")
+
+  prerequisites        ConceptPrerequisite[] @relation("ConceptPrereqs")
+  prerequisiteFor      ConceptPrerequisite[] @relation("PrereqForConcepts")
+  userConcepts         UserConcept[]
+  lessons              Lesson[]
+  assessmentQuestions  AssessmentQuestion[]
+  quizQuestions        QuizQuestion[]
+  codingChallenges     CodingChallenge[]
+  explainBackAttempts  ExplainBackAttempt[]
+  recallSchedules      RecallSchedule[]
+  recallAttempts       RecallAttempt[]
+  learningActivities   LearningActivity[]
+  learningPathItems    LearningPathItem[]
+  recommendationLogs   RecommendationLog[]
+
+  @@map("concepts")
+}
+
+model ConceptPrerequisite {
+  id                     String   @id @default(uuid())
+  conceptId              String   @map("concept_id")
+  concept                Concept  @relation("ConceptPrereqs", fields: [conceptId], references: [id], onDelete: Cascade)
+  prerequisiteConceptId  String   @map("prerequisite_concept_id")
+  prerequisiteConcept    Concept  @relation("PrereqForConcepts", fields: [prerequisiteConceptId], references: [id], onDelete: Cascade)
+  strength               Int      @default(1)
+
+  @@unique([conceptId, prerequisiteConceptId])
+  @@map("concept_prerequisites")
+}
+
+model UserSkill {
+  id               String    @id @default(uuid())
+  userId           String    @map("user_id")
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skillId          String    @map("skill_id")
+  skill            Skill     @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  masteryScore     Float     @default(0) @map("mastery_score")
+  confidenceScore  Float     @default(0) @map("confidence_score")
+  lastAssessedAt   DateTime? @map("last_assessed_at")
+  lastPracticedAt  DateTime? @map("last_practiced_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@unique([userId, skillId])
+  @@map("user_skills")
+}
+
+model UserConcept {
+  id               String    @id @default(uuid())
+  userId           String    @map("user_id")
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conceptId        String    @map("concept_id")
+  concept          Concept   @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  masteryScore     Float     @default(0) @map("mastery_score")
+  confidenceScore  Float     @default(0) @map("confidence_score")
+  attempts         Int       @default(0)
+  correctAttempts      Int       @default(0) @map("correct_attempts")
+  hintsCount           Int       @default(0) @map("hints_count")
+  independentSuccesses Int       @default(0) @map("independent_successes")
+  assistedSuccesses    Int       @default(0) @map("assisted_successes")
+  lastSeenAt           DateTime? @map("last_seen_at")
+  nextReviewAt         DateTime? @map("next_review_at")
+  misconceptions       Json?
+  lastActionType       String?   @map("last_action_type") // ADVANCE, REINFORCE, REVIEW, PREREQUISITE
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@unique([userId, conceptId])
+  @@index([userId, masteryScore])
+  @@map("user_concepts")
+}
+
+model Assessment {
+  id          String               @id @default(uuid())
+  title       String
+  type        String               @default("INITIAL") // INITIAL, DIAGNOSTIC, MILESTONE
+  skillId     String?              @map("skill_id")
+  skill       Skill?               @relation(fields: [skillId], references: [id])
+  difficulty  String               @default("ADAPTIVE")
+  status      String               @default("ACTIVE")
+  createdAt   DateTime             @default(now()) @map("created_at")
+
+  questions   AssessmentQuestion[]
+  attempts    AssessmentAttempt[]
+
+  @@map("assessments")
+}
+
+model AssessmentQuestion {
+  id            String               @id @default(uuid())
+  assessmentId  String               @map("assessment_id")
+  assessment    Assessment           @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  conceptId     String?              @map("concept_id")
+  concept       Concept?             @relation(fields: [conceptId], references: [id])
+  questionType  String               @default("MCQ") @map("question_type")
+  questionText  String               @map("question_text")
+  options       Json?
+  answer        Json
+  explanation   String?
+  difficulty    Int                  @default(1)
+
+  responses     AssessmentResponse[]
+
+  @@map("assessment_questions")
+}
+
+model AssessmentAttempt {
+  id              String               @id @default(uuid())
+  userId          String               @map("user_id")
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assessmentId    String               @map("assessment_id")
+  assessment      Assessment           @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  score           Float                @default(0)
+  durationSeconds Int                  @default(0) @map("duration_seconds")
+  startedAt       DateTime             @default(now()) @map("started_at")
+  completedAt     DateTime?            @map("completed_at")
+
+  responses       AssessmentResponse[]
+
+  @@map("assessment_attempts")
+}
+
+model AssessmentResponse {
+  id          String             @id @default(uuid())
+  attemptId   String             @map("attempt_id")
+  attempt     AssessmentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId  String             @map("question_id")
+  question    AssessmentQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  response    String
+  isCorrect   Boolean            @map("is_correct")
+  confidence  Float              @default(1.0)
+  feedback    String?
+  createdAt   DateTime           @default(now()) @map("created_at")
+
+  @@map("assessment_responses")
+}
+
+model LearningPath {
+  id                   String             @id @default(uuid())
+  userId               String             @map("user_id")
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  learningGoalId       String?            @map("learning_goal_id")
+  learningGoal         LearningGoal?      @relation(fields: [learningGoalId], references: [id], onDelete: Cascade)
+  title                String
+  status               String             @default("ACTIVE")
+  version              Int                @default(1)
+  previousPathId       String?            @map("previous_path_id")
+  previousPath         LearningPath?      @relation("PathVersions", fields: [previousPathId], references: [id])
+  nextPaths            LearningPath[]     @relation("PathVersions")
+  analysisType         String?            @map("analysis_type") // INITIAL, MINI, FULL, LONG_TERM, DETERMINISTIC
+  triggerReason        String?            @map("trigger_reason")
+  evidenceSummary      Json?              @map("evidence_summary")
+  confidence           Float?             @default(1.0)
+  completionPercentage Float              @default(0) @map("completion_percentage")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+
+  items                LearningPathItem[]
+
+  @@map("learning_paths")
+}
+
+model LearningPathItem {
+  id             String       @id @default(uuid())
+  learningPathId String       @map("learning_path_id")
+  learningPath   LearningPath @relation(fields: [learningPathId], references: [id], onDelete: Cascade)
+  conceptId      String       @map("concept_id")
+  concept        Concept      @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  sequenceOrder  Int          @map("sequence_order")
+  status         String       @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, BLOCKED
+  reason         String?
+  completedAt    DateTime?    @map("completed_at")
+
+  @@unique([learningPathId, conceptId])
+  @@map("learning_path_items")
+}
+
+model Lesson {
+  id               String            @id @default(uuid())
+  conceptId        String            @map("concept_id")
+  concept          Concept           @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  title            String
+  slug             String            @unique
+  objective        String
+  content          String
+  difficulty       String            @default("BEGINNER")
+  estimatedMinutes Int               @default(10) @map("estimated_minutes")
+  contentVersion   String            @default("1.0") @map("content_version")
+  status           String            @default("PUBLISHED")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  activities       LessonActivity[]
+  quizzes          Quiz[]
+  sessions         LearningSession[]
+  aiConversations  AiConversation[]
+  recommendationLogs RecommendationLog[]
+
+  @@map("lessons")
+}
+
+model LessonActivity {
+  id               String   @id @default(uuid())
+  lessonId         String   @map("lesson_id")
+  lesson           Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  activityType     String   @map("activity_type") // RECALL, EXPLANATION, EXAMPLE, PRACTICE, QUIZ, SUMMARY
+  sequenceOrder    Int      @map("sequence_order")
+  content          Json
+  estimatedSeconds Int      @default(120) @map("estimated_seconds")
+
+  @@map("lesson_activities")
+}
+
+model LearningSession {
+  id              String    @id @default(uuid())
+  userId          String    @map("user_id")
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lessonId        String    @map("lesson_id")
+  lesson          Lesson    @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  sessionType      String              @default("DAILY_LESSON") @map("session_type")
+  status           String              @default("STARTED") // STARTED, IN_PROGRESS, COMPLETED, ABANDONED
+  currentStage     Int                 @default(0) @map("current_stage")
+  lastSavedState   Json?               @map("last_saved_state")
+  durationSeconds  Int                 @default(0) @map("duration_seconds")
+  hintsUsed        Int                 @default(0) @map("hints_used")
+  initialMastery   Float?              @map("initial_mastery")
+  finalMastery     Float?              @map("final_mastery")
+  quizAttemptId    String?             @map("quiz_attempt_id")
+  quizAttempt      QuizAttempt?        @relation(fields: [quizAttemptId], references: [id], onDelete: SetNull)
+  explainAttemptId String?             @map("explain_attempt_id")
+  explainAttempt   ExplainBackAttempt? @relation(fields: [explainAttemptId], references: [id], onDelete: SetNull)
+  startedAt        DateTime            @default(now()) @map("started_at")
+  completedAt      DateTime?           @map("completed_at")
+
+  @@index([userId, status])
+  @@index([userId, lessonId, status])
+  @@map("learning_sessions")
+}
+
+model Quiz {
+  id        String         @id @default(uuid())
+  lessonId  String         @map("lesson_id")
+  lesson    Lesson         @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  title     String
+  status    String         @default("ACTIVE")
+
+  questions QuizQuestion[]
+  attempts  QuizAttempt[]
+
+  @@map("quizzes")
+}
+
+model QuizQuestion {
+  id           String         @id @default(uuid())
+  quizId       String         @map("quiz_id")
+  quiz         Quiz           @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  conceptId    String?        @map("concept_id")
+  concept      Concept?       @relation(fields: [conceptId], references: [id])
+  questionType String         @default("MCQ") @map("question_type")
+  questionText String         @map("question_text")
+  options      Json?
+  answer       Json
+  explanation  String?
+  difficulty   Int            @default(1)
+
+  responses    QuizResponse[]
+
+  @@map("quiz_questions")
+}
+
+model QuizAttempt {
+  id              String         @id @default(uuid())
+  userId          String         @map("user_id")
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quizId          String         @map("quiz_id")
+  quiz            Quiz           @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  score           Float          @default(0)
+  durationSeconds Int            @default(0) @map("duration_seconds")
+  startedAt       DateTime       @default(now()) @map("started_at")
+  completedAt     DateTime?      @map("completed_at")
+
+  responses        QuizResponse[]
+  learningSessions LearningSession[]
+
+  @@map("quiz_attempts")
+}
+
+model QuizResponse {
+  id         String       @id @default(uuid())
+  attemptId  String       @map("attempt_id")
+  attempt    QuizAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId String       @map("question_id")
+  question   QuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  response   String
+  isCorrect  Boolean      @map("is_correct")
+  confidence Float        @default(1.0)
+  feedback   String?
+
+  @@map("quiz_responses")
+}
+
+model CodingChallenge {
+  id               String           @id @default(uuid())
+  conceptId        String           @map("concept_id")
+  concept          Concept          @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  title            String
+  problemStatement String           @map("problem_statement")
+  starterCode      String           @map("starter_code")
+  testCases        Json             @map("test_cases")
+  language         String           @default("javascript")
+  difficulty       String           @default("EASY")
+  status           String           @default("ACTIVE")
+
+  submissions      CodeSubmission[]
+
+  @@map("coding_challenges")
+}
+
+model CodeSubmission {
+  id              String          @id @default(uuid())
+  userId          String          @map("user_id")
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challengeId     String          @map("challenge_id")
+  challenge       CodingChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  code            String
+  language        String          @default("javascript")
+  status          String          @default("PENDING") // PENDING, PASSED, FAILED, DISABLED
+  score           Float           @default(0)
+  executionTimeMs Int?            @map("execution_time_ms")
+  memoryKb        Int?            @map("memory_kb")
+  aiFeedback      String?         @map("ai_feedback")
+  submittedAt     DateTime        @default(now()) @map("submitted_at")
+
+  @@map("code_submissions")
+}
+
+model ExplainBackAttempt {
+  id                String   @id @default(uuid())
+  userId            String   @map("user_id")
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conceptId         String   @map("concept_id")
+  concept           Concept  @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  responseText      String   @map("response_text")
+  accuracyScore     Float    @default(0) @map("accuracy_score")
+  completenessScore Float    @default(0) @map("completeness_score")
+  clarityScore      Float    @default(0) @map("clarity_score")
+  overallScore      Float    @default(0) @map("overall_score")
+  misconceptions    Json?
+  feedback          String?
+  createdAt         DateTime          @default(now()) @map("created_at")
+
+  learningSessions  LearningSession[]
+
+  @@map("explain_back_attempts")
+}
+
+model RecallSchedule {
+  id              String          @id @default(uuid())
+  userId          String          @map("user_id")
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conceptId       String          @map("concept_id")
+  concept         Concept         @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  scheduledAt     DateTime        @map("scheduled_at")
+  intervalDays    Int             @default(1) @map("interval_days")
+  predictedRecall Float           @default(0.9) @map("predicted_recall")
+  status          String          @default("SCHEDULED") // SCHEDULED, COMPLETED, OVERDUE
+
+  attempts        RecallAttempt[]
+
+  @@unique([userId, conceptId])
+  @@index([userId, scheduledAt, status])
+  @@map("recall_schedules")
+}
+
+model RecallAttempt {
+  id          String          @id @default(uuid())
+  scheduleId  String?         @map("schedule_id")
+  schedule    RecallSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  userId      String          @map("user_id")
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conceptId   String          @map("concept_id")
+  concept     Concept         @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  rating      Int             // 1 to 5
+  recalled    Boolean         @default(true)
+  confidence  Float           @default(1.0)
+  attemptedAt DateTime        @default(now()) @map("attempted_at")
+
+  @@map("recall_attempts")
+}
+
+model AiConversation {
+  id          String      @id @default(uuid())
+  userId      String      @map("user_id")
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lessonId    String?     @map("lesson_id")
+  lesson      Lesson?     @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  contextType String      @default("LESSON_TUTOR") @map("context_type")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  messages    AiMessage[]
+
+  @@map("ai_conversations")
+}
+
+model AiMessage {
+  id             String         @id @default(uuid())
+  conversationId String         @map("conversation_id")
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String         // user, assistant, system
+  content        String
+  model          String?
+  inputTokens    Int?           @map("input_tokens")
+  outputTokens   Int?           @map("output_tokens")
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  @@map("ai_messages")
+}
+
+model LearningActivity {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conceptId       String?  @map("concept_id")
+  concept         Concept? @relation(fields: [conceptId], references: [id], onDelete: SetNull)
+  activityType    String   @map("activity_type") // LESSON, QUIZ, EXPLAIN_BACK, RECALL, CHALLENGE
+  sourceType      String   @map("source_type")
+  sourceId        String?  @map("source_id")
+  score           Float?
+  durationSeconds Int      @default(0) @map("duration_seconds")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@map("learning_activities")
+}
+
+model Streak {
+  id               String    @id @default(uuid())
+  userId           String    @unique @map("user_id")
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currentStreak    Int       @default(0) @map("current_streak")
+  longestStreak    Int       @default(0) @map("longest_streak")
+  lastActivityDate DateTime? @map("last_activity_date")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@map("streaks")
+}
+
+model Achievement {
+  id               String            @id @default(uuid())
+  code             String            @unique
+  name             String
+  description      String
+  xp               Int               @default(50)
+  icon             String?
+
+  userAchievements UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            String      @id @default(uuid())
+  userId        String      @map("user_id")
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievementId String      @map("achievement_id")
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  earnedAt      DateTime    @default(now()) @map("earned_at")
+
+  @@unique([userId, achievementId])
+  @@map("user_achievements")
+}
+
+model XpTransaction {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceType String   @map("source_type")
+  sourceId   String   @map("source_id")
+  amount     Int
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, sourceType, sourceId]) // Prevents duplicate rewards for same source
+  @@map("xp_transactions")
+}
+
+model Notification {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        String
+  title       String
+  body        String
+  status      String    @default("PENDING") // PENDING, SENT, READ
+  scheduledAt DateTime? @map("scheduled_at")
+  sentAt      DateTime? @map("sent_at")
+  readAt      DateTime? @map("read_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@map("notifications")
+}
+
+model SubscriptionPlan {
+  id           String         @id @default(uuid())
+  name         String
+  code         String         @unique // FREE, PRO
+  monthlyPrice Float          @default(0) @map("monthly_price")
+  annualPrice  Float          @default(0) @map("annual_price")
+  currency     String         @default("USD")
+  features     Json
+  status       String         @default("ACTIVE")
+
+  subscriptions Subscription[]
+
+  @@map("subscription_plans")
+}
+
+model Subscription {
+  id                     String           @id @default(uuid())
+  userId                 String           @map("user_id")
+  user                   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId                 String           @map("plan_id")
+  plan                   SubscriptionPlan @relation(fields: [planId], references: [id])
+  provider               String           @default("STRIPE")
+  providerCustomerId     String?          @map("provider_customer_id")
+  providerSubscriptionId String?          @map("provider_subscription_id")
+  status                 String           @default("ACTIVE")
+  currentPeriodStart     DateTime         @default(now()) @map("current_period_start")
+  currentPeriodEnd       DateTime?        @map("current_period_end")
+  canceledAt             DateTime?        @map("canceled_at")
+  createdAt              DateTime         @default(now()) @map("created_at")
+
+  payments               Payment[]
+
+  @@map("subscriptions")
+}
+
+model Payment {
+  id                String        @id @default(uuid())
+  userId            String        @map("user_id")
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionId    String?       @map("subscription_id")
+  subscription      Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  provider          String        @default("STRIPE")
+  providerPaymentId String?       @map("provider_payment_id")
+  amount            Float
+  currency          String        @default("USD")
+  status            String        @default("SUCCEEDED")
+  paidAt            DateTime      @default(now()) @map("paid_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+
+  @@map("payments")
+}
+
+model RecommendationLog {
+  id              String    @id @default(uuid())
+  userId          String    @map("user_id")
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  actionType      String    @map("action_type") // ADVANCE, REINFORCE, REVIEW, PREREQUISITE
+  conceptId       String?   @map("concept_id")
+  concept         Concept?  @relation(fields: [conceptId], references: [id], onDelete: SetNull)
+  lessonId        String?   @map("lesson_id")
+  lesson          Lesson?   @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  reason          String
+  dailyMinutes    Int       @default(15) @map("daily_minutes")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@map("recommendation_logs")
+}
