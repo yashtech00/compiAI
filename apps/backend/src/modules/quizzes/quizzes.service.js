@@ -26,6 +26,11 @@ export class QuizService {
       throw new AppError('Quiz not found', 404, 'QUIZ_NOT_FOUND');
     }
 
+    // Authorization check: If this quiz belongs to a user-custom lesson, only that user may submit
+    if (quiz.lesson?.userId && quiz.lesson.userId !== userId) {
+      throw new AppError('Unauthorized access to quiz', 403, 'FORBIDDEN');
+    }
+
     const questionMap = new Map();
     for (const q of quiz.questions) {
       questionMap.set(q.id, q);
@@ -39,12 +44,25 @@ export class QuizService {
       const question = questionMap.get(r.questionId);
       if (!question) continue;
 
+      // Validate option membership if options are present
+      const opts = Array.isArray(question.options) ? question.options : [];
+      let userAns = String(r.response || '').trim();
+
+      // If user passed a numeric index string (e.g. "0", "1", "2", "3")
+      if (/^[0-3]$/.test(userAns) && opts[Number(userAns)]) {
+        userAns = opts[Number(userAns)];
+      }
+
+      // Check if user answer is an allowed option
+      if (opts.length > 0 && !opts.some(o => o.trim().toLowerCase() === userAns.toLowerCase())) {
+        throw new AppError(`Invalid answer option for question: ${question.questionText}`, 400, 'INVALID_ANSWER_OPTION');
+      }
+
       const difficultyWeight = question.difficulty || 1;
       totalPoints += difficultyWeight;
 
-      const userAns = String(r.response || '').trim().toLowerCase();
       const correctAns = String(question.answer || '').trim().toLowerCase();
-      const isCorrect = userAns === correctAns;
+      const isCorrect = userAns.toLowerCase() === correctAns;
 
       if (isCorrect) {
         earnedPoints += difficultyWeight;
@@ -52,7 +70,7 @@ export class QuizService {
 
       evaluatedResponses.push({
         questionId: question.id,
-        response: String(r.response || ''),
+        response: userAns,
         isCorrect,
         correctAnswer: question.answer,
         explanation: question.explanation || '',
@@ -65,9 +83,20 @@ export class QuizService {
     const concept = quiz.lesson.concept;
     const skill = concept?.skill;
 
+    // Check for previous attempts on this quiz to guard against duplicate submissions
+    const previousAttempts = await prisma.quizAttempt.findMany({
+      where: { userId, quizId },
+      orderBy: { completedAt: 'desc' },
+      take: 5
+    });
+
+    const hasPassedBefore = previousAttempts.some(a => a.score >= 70);
+    const bestPreviousScore = previousAttempts.length > 0 ? Math.max(...previousAttempts.map(a => a.score)) : 0;
+    const isRedundantAttempt = hasPassedBefore && scorePercentage <= bestPreviousScore;
+
     // Use transaction for consistency across mastery, quiz attempt, XP, and streak
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Record QuizAttempt and Responses
+      // 1. Record QuizAttempt and Responses (always preserved for audit history)
       const attempt = await tx.quizAttempt.create({
         data: {
           userId,
@@ -99,58 +128,71 @@ export class QuizService {
         const currentMastery = existingConcept?.masteryScore || 0;
         const currentConfidence = existingConcept?.confidenceScore || 50;
 
-        masteryOutcome = MasteryEngine.evaluateAssessmentOutcome({
-          currentMastery,
-          currentConfidence,
-          isPassed,
-          scorePercentage,
-          hintsUsed,
-          priorAttempts: existingConcept?.attempts || 0,
-          correctAttempts: existingConcept?.correctAttempts || 0,
-          independentSuccesses: existingConcept?.independentSuccesses || 0,
-          assistedSuccesses: existingConcept?.assistedSuccesses || 0,
-          timeSpentSeconds: durationSeconds
-        });
+        if (isRedundantAttempt) {
+          // Re-submission of already passed quiz with equal or lower score:
+          // Preserve demonstrated mastery score without artificial inflation or penalties
+          updatedConcept = existingConcept;
+          masteryOutcome = {
+            newMastery: currentMastery,
+            newConfidence: currentConfidence,
+            masteryDelta: 0,
+            actionType: 'ADVANCE',
+            reason: 'Maintained demonstrated mastery score from prior success.'
+          };
+        } else {
+          masteryOutcome = MasteryEngine.evaluateAssessmentOutcome({
+            currentMastery,
+            currentConfidence,
+            isPassed,
+            scorePercentage,
+            hintsUsed,
+            priorAttempts: existingConcept?.attempts || 0,
+            correctAttempts: existingConcept?.correctAttempts || 0,
+            independentSuccesses: existingConcept?.independentSuccesses || 0,
+            assistedSuccesses: existingConcept?.assistedSuccesses || 0,
+            timeSpentSeconds: durationSeconds
+          });
 
-        const wrongResponses = evaluatedResponses.filter(r => !r.isCorrect);
-        const misconceptionsList = wrongResponses.length > 0
-          ? wrongResponses.map(r => r.explanation || `Mistake on question: ${r.response}`)
-          : null;
+          const wrongResponses = evaluatedResponses.filter(r => !r.isCorrect);
+          const misconceptionsList = wrongResponses.length > 0
+            ? wrongResponses.map(r => r.explanation || `Mistake on question: ${r.response}`)
+            : null;
 
-        updatedConcept = await tx.userConcept.upsert({
-          where: { userId_conceptId: { userId, conceptId: concept.id } },
-          update: {
-            masteryScore: masteryOutcome.newMastery,
-            confidenceScore: masteryOutcome.newConfidence,
-            attempts: { increment: 1 },
-            correctAttempts: isPassed ? { increment: 1 } : undefined,
-            hintsCount: { increment: hintsUsed },
-            independentSuccesses: masteryOutcome.isIndependentSuccess ? { increment: 1 } : undefined,
-            assistedSuccesses: masteryOutcome.isAssistedSuccess ? { increment: 1 } : undefined,
-            misconceptions: misconceptionsList,
-            lastActionType: masteryOutcome.actionType,
-            lastSeenAt: new Date(),
-            nextReviewAt: new Date(Date.now() + masteryOutcome.nextReviewDays * 24 * 60 * 60 * 1000)
-          },
-          create: {
-            userId,
-            conceptId: concept.id,
-            masteryScore: masteryOutcome.newMastery,
-            confidenceScore: masteryOutcome.newConfidence,
-            attempts: 1,
-            correctAttempts: isPassed ? 1 : 0,
-            hintsCount: hintsUsed,
-            independentSuccesses: masteryOutcome.isIndependentSuccess ? 1 : 0,
-            assistedSuccesses: masteryOutcome.isAssistedSuccess ? 1 : 0,
-            misconceptions: misconceptionsList,
-            lastActionType: masteryOutcome.actionType,
-            lastSeenAt: new Date(),
-            nextReviewAt: new Date(Date.now() + masteryOutcome.nextReviewDays * 24 * 60 * 60 * 1000)
-          }
-        });
+          updatedConcept = await tx.userConcept.upsert({
+            where: { userId_conceptId: { userId, conceptId: concept.id } },
+            update: {
+              masteryScore: masteryOutcome.newMastery,
+              confidenceScore: masteryOutcome.newConfidence,
+              attempts: { increment: 1 },
+              correctAttempts: isPassed ? { increment: 1 } : undefined,
+              hintsCount: { increment: hintsUsed },
+              independentSuccesses: masteryOutcome.isIndependentSuccess ? { increment: 1 } : undefined,
+              assistedSuccesses: masteryOutcome.isAssistedSuccess ? { increment: 1 } : undefined,
+              misconceptions: isPassed ? null : misconceptionsList, // Clear resolved misconceptions on pass
+              lastActionType: masteryOutcome.actionType,
+              lastSeenAt: new Date(),
+              nextReviewAt: new Date(Date.now() + masteryOutcome.nextReviewDays * 24 * 60 * 60 * 1000)
+            },
+            create: {
+              userId,
+              conceptId: concept.id,
+              masteryScore: masteryOutcome.newMastery,
+              confidenceScore: masteryOutcome.newConfidence,
+              attempts: 1,
+              correctAttempts: isPassed ? 1 : 0,
+              hintsCount: hintsUsed,
+              independentSuccesses: masteryOutcome.isIndependentSuccess ? 1 : 0,
+              assistedSuccesses: masteryOutcome.isAssistedSuccess ? 1 : 0,
+              misconceptions: isPassed ? null : misconceptionsList,
+              lastActionType: masteryOutcome.actionType,
+              lastSeenAt: new Date(),
+              nextReviewAt: new Date(Date.now() + masteryOutcome.nextReviewDays * 24 * 60 * 60 * 1000)
+            }
+          });
+        }
 
         // 3. Update UserSkill aggregate
-        if (skill) {
+        if (skill && !isRedundantAttempt) {
           const allUserConcepts = await tx.userConcept.findMany({
             where: {
               userId,
@@ -180,27 +222,29 @@ export class QuizService {
         }
 
         // 4. Update Spaced Repetition (RecallSchedule) with scientifically scheduled intervals
-        const nextReviewDate = new Date(Date.now() + masteryOutcome.nextReviewDays * 24 * 60 * 60 * 1000);
-        await tx.recallSchedule.upsert({
-          where: { userId_conceptId: { userId, conceptId: concept.id } },
-          update: {
-            scheduledAt: nextReviewDate,
-            intervalDays: masteryOutcome.nextReviewDays,
-            predictedRecall: masteryOutcome.predictedRecall,
-            status: 'SCHEDULED'
-          },
-          create: {
-            userId,
-            conceptId: concept.id,
-            scheduledAt: nextReviewDate,
-            intervalDays: masteryOutcome.nextReviewDays,
-            predictedRecall: masteryOutcome.predictedRecall,
-            status: 'SCHEDULED'
-          }
-        });
+        if (!isRedundantAttempt) {
+          const nextReviewDate = new Date(Date.now() + masteryOutcome.nextReviewDays * 24 * 60 * 60 * 1000);
+          await tx.recallSchedule.upsert({
+            where: { userId_conceptId: { userId, conceptId: concept.id } },
+            update: {
+              scheduledAt: nextReviewDate,
+              intervalDays: masteryOutcome.nextReviewDays,
+              predictedRecall: masteryOutcome.predictedRecall,
+              status: 'SCHEDULED'
+            },
+            create: {
+              userId,
+              conceptId: concept.id,
+              scheduledAt: nextReviewDate,
+              intervalDays: masteryOutcome.nextReviewDays,
+              predictedRecall: masteryOutcome.predictedRecall,
+              status: 'SCHEDULED'
+            }
+          });
+        }
 
-        // 5. Update LearningPathItem when quiz is passed or earned mastery milestone reached
-        if (isPassed || masteryOutcome.newMastery >= 60) {
+        // 5. Update LearningPathItem when quiz is passed
+        if (isPassed) {
           await tx.learningPathItem.updateMany({
             where: {
               learningPath: { userId, status: 'ACTIVE' },
@@ -227,24 +271,27 @@ export class QuizService {
         }
       });
 
-      // 7. Award XP (50 XP for completing quiz, +25 if 100% score)
-      const xpAmount = scorePercentage === 100 ? 75 : 50;
-      await tx.xpTransaction.upsert({
+      // 7. Award XP idempotently (only once per quiz)
+      const existingXp = await tx.xpTransaction.findFirst({
         where: {
-          userId_sourceType_sourceId: {
-            userId,
-            sourceType: 'QUIZ',
-            sourceId: attempt.id
-          }
-        },
-        update: {},
-        create: {
           userId,
           sourceType: 'QUIZ',
-          sourceId: attempt.id,
-          amount: xpAmount
+          sourceId: quiz.id
         }
       });
+
+      let xpAmount = 0;
+      if (!existingXp && isPassed) {
+        xpAmount = scorePercentage === 100 ? 75 : 50;
+        await tx.xpTransaction.create({
+          data: {
+            userId,
+            sourceType: 'QUIZ',
+            sourceId: quiz.id,
+            amount: xpAmount
+          }
+        });
+      }
 
       // 8. Update Streak
       const streakRecord = await tx.streak.findUnique({ where: { userId } });
@@ -303,7 +350,9 @@ export class QuizService {
           data: {
             quizAttemptId: attempt.id,
             hintsUsed: { increment: hintsUsed },
-            finalMastery: masteryOutcome?.newMastery || 0
+            finalMastery: masteryOutcome?.newMastery || 0,
+            status: isPassed ? 'COMPLETED' : activeSession.status,
+            completedAt: isPassed ? new Date() : null
           }
         });
       }

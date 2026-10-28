@@ -31,7 +31,8 @@ interface TodayData {
   };
   recommendedActivity: {
     type: string;
-    actionType?: 'ADVANCE' | 'REINFORCE' | 'REVIEW' | 'PREREQUISITE' | 'CONTENT_UNAVAILABLE';
+    actionType?: 'ADVANCE' | 'REINFORCE' | 'REMEDIATE' | 'REVIEW' | 'PREREQUISITE' | 'CONTENT_UNAVAILABLE' | 'COMPLETED';
+    isPathCompleted?: boolean;
     title: string;
     concept: {
       id: string;
@@ -108,16 +109,19 @@ export default function TodayPage() {
   }
 
   const act = data.recommendedActivity;
+  const isCompleted = act.actionType === 'COMPLETED' || (act as any).isPathCompleted;
   const targetSlug = act.lessonSlug;
-  const isContentUnavailable = act.actionType === 'CONTENT_UNAVAILABLE' || !targetSlug;
+  const isContentUnavailable = !isCompleted && (act.actionType === 'CONTENT_UNAVAILABLE' || !targetSlug);
 
   // Action badge config
   const actionBadges: Record<string, { label: string; variant: 'purple' | 'warning' | 'info' | 'success' }> = {
     ADVANCE: { label: "Today's Recommended Milestone", variant: 'purple' },
     REINFORCE: { label: 'Targeted Reinforcement', variant: 'warning' },
+    REMEDIATE: { label: 'Targeted Remediation', variant: 'warning' },
     REVIEW: { label: 'Spaced Retrieval Practice', variant: 'info' },
     PREREQUISITE: { label: 'Foundational Knowledge Step', variant: 'purple' },
-    CONTENT_UNAVAILABLE: { label: 'Content In Editorial Review', variant: 'warning' }
+    CONTENT_UNAVAILABLE: { label: 'Content In Editorial Review', variant: 'warning' },
+    COMPLETED: { label: 'Curriculum Mastered', variant: 'success' }
   };
 
   const actionBadge = actionBadges[act.actionType || 'ADVANCE'] || actionBadges.ADVANCE;
@@ -176,9 +180,11 @@ export default function TodayPage() {
             {act.title}
           </h2>
 
-          <div className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-4">
-            Concept: {act.concept?.name} {act.concept?.skillName ? `• ${act.concept.skillName}` : ''}
-          </div>
+          {act.concept && (
+            <div className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-4">
+              Concept: {act.concept.name} {act.concept.skillName ? `• ${act.concept.skillName}` : ''}
+            </div>
+          )}
 
           {/* Explainable Recommendation Reason */}
           <div className="p-4 rounded-xl bg-white/80 dark:bg-slate-950/70 border border-indigo-100 dark:border-slate-800 text-xs sm:text-sm text-slate-700 dark:text-slate-300 leading-relaxed mb-6">
@@ -188,7 +194,14 @@ export default function TodayPage() {
 
           {/* Singular Primary CTA */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            {isContentUnavailable ? (
+            {isCompleted ? (
+              <Link href="/learning-path">
+                <Button size="lg" className="w-full sm:w-auto gap-2.5 text-base font-semibold shadow-xl shadow-emerald-600/30 bg-emerald-600 hover:bg-emerald-500">
+                  <CheckCircle2 className="w-4 h-4 fill-white" />
+                  View Completed Learning Path
+                </Button>
+              </Link>
+            ) : isContentUnavailable ? (
               <div className="px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 text-xs font-medium">
                 This curriculum module is currently being finalized. Please check back shortly or explore your learning history.
               </div>
@@ -196,7 +209,7 @@ export default function TodayPage() {
               <Link href={`/lessons/${targetSlug}`}>
                 <Button size="lg" className="w-full sm:w-auto gap-2.5 text-base font-semibold shadow-xl shadow-indigo-600/30">
                   <Play className="w-4 h-4 fill-white" />
-                  Start Today&apos;s Learning
+                  {act.actionType === 'REMEDIATE' ? 'Start Remediation Session' : "Start Today's Learning"}
                 </Button>
               </Link>
             )}

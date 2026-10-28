@@ -470,7 +470,21 @@ CRITICAL CONSTRAINTS:
       rationale: 'Deterministic evidence evaluation based on session hints, quiz accuracy, and misconception tags.',
       reviewAt: analysisType === 'MINI' ? '3_SESSIONS' : '5_ACTIVE_DAYS',
       provider: 'deterministic',
-      model: 'deterministic-rules-engine'
     };
+  }
+
+  /**
+   * Generates structured 9-stage microlearning session and calibrated quiz for a milestone.
+   * Conforms to the Phase 1 documented interface:
+   * AiService.generateSessionContent({ milestone, learnerProfile, misconceptions, isRemediation })
+   */
+  static async generateSessionContent({ milestone, learnerProfile, misconceptions = [], isRemediation = false }) {
+    const { SessionGeneratorService } = await import('../lessons/session-generator.service.js');
+    return SessionGeneratorService.generateSessionPayload({
+      milestone,
+      learnerProfile,
+      misconceptions,
+      isRemediation
+    });
   }
 }

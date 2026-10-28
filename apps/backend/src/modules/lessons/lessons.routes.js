@@ -28,7 +28,7 @@ router.get('/', requireAuth, async (req, res, next) => {
 router.get('/:idOrSlug', requireAuth, async (req, res, next) => {
   try {
     const { idOrSlug } = req.params;
-    const lesson = await prisma.lesson.findFirst({
+    let lesson = await prisma.lesson.findFirst({
       where: {
         OR: [
           { id: idOrSlug },
@@ -68,8 +68,80 @@ router.get('/:idOrSlug', requireAuth, async (req, res, next) => {
       }
     });
 
+    // If lesson not found directly by id or slug, check if idOrSlug refers to a custom Concept or Milestone
+    if (!lesson) {
+      const { SessionGeneratorService } = await import('./session-generator.service.js');
+      const concept = await prisma.concept.findFirst({
+        where: {
+          AND: [
+            {
+              OR: [
+                { id: idOrSlug },
+                { slug: idOrSlug }
+              ]
+            },
+            {
+              OR: [
+                { isCustom: false },
+                { userId: req.user.id }
+              ]
+            }
+          ]
+        }
+      });
+
+      if (concept) {
+        const generated = await SessionGeneratorService.getOrCreateSession({
+          userId: req.user.id,
+          conceptId: concept.id
+        });
+
+        if (generated) {
+          // Re-fetch sanitized lesson structure (stripping answer and explanation)
+          lesson = await prisma.lesson.findUnique({
+            where: { id: generated.id },
+            include: {
+              concept: {
+                include: {
+                  skill: true,
+                  prerequisites: {
+                    include: { prerequisiteConcept: true }
+                  }
+                }
+              },
+              activities: {
+                orderBy: { sequenceOrder: 'asc' }
+              },
+              quizzes: {
+                where: { status: 'ACTIVE' },
+                take: 1,
+                select: {
+                  id: true,
+                  title: true,
+                  questions: {
+                    select: {
+                      id: true,
+                      questionType: true,
+                      questionText: true,
+                      options: true,
+                      difficulty: true
+                    }
+                  }
+                }
+              }
+            }
+          });
+        }
+      }
+    }
+
     if (!lesson) {
       throw new AppError('Lesson not found', 404, 'LESSON_NOT_FOUND');
+    }
+
+    // Authorization check: If this is an AI-generated lesson scoped to another user, forbid access
+    if (lesson.userId && lesson.userId !== req.user.id) {
+      throw new AppError('Unauthorized access to lesson', 403, 'FORBIDDEN');
     }
 
     return successResponse(res, { lesson }, 'Lesson loaded');

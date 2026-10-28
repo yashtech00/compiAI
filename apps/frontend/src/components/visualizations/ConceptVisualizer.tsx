@@ -6,10 +6,30 @@ import { RotateCcw, ChevronRight, ChevronLeft } from 'lucide-react';
 interface ConceptVisualizerProps {
   visualType?: string;
   conceptTitle?: string;
+  diagram?: string;
+  explanation?: string;
 }
 
-export function ConceptVisualizer({ visualType = 'event-loop' }: ConceptVisualizerProps) {
+export function ConceptVisualizer({
+  visualType = 'event-loop',
+  conceptTitle,
+  diagram,
+  explanation
+}: ConceptVisualizerProps) {
   const [step, setStep] = useState(0);
+
+  // If a custom diagram or custom visualType is provided, render DynamicArchitectureVisualizer
+  const isPreBuilt = ['event-loop', 'load-balancer', 'b-tree-indexing', 'idempotency-key', 'cache-aside', 'rag-pipeline', 'closure-scope'].includes(visualType);
+
+  if (diagram || !isPreBuilt) {
+    return (
+      <DynamicArchitectureVisualizer
+        title={conceptTitle || 'System Architecture Flow'}
+        diagram={diagram}
+        explanation={explanation}
+      />
+    );
+  }
 
   // Render specific interactive diagram based on visualType
   switch (visualType) {
@@ -28,6 +48,38 @@ export function ConceptVisualizer({ visualType = 'event-loop' }: ConceptVisualiz
     default:
       return <ClosureScopeVisualizer step={step} setStep={setStep} />;
   }
+}
+
+function DynamicArchitectureVisualizer({
+  title,
+  diagram,
+  explanation
+}: {
+  title: string;
+  diagram?: string;
+  explanation?: string;
+}) {
+  return (
+    <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 text-slate-100 flex flex-col gap-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <span className="text-xs font-bold uppercase tracking-wider text-indigo-400">Architecture Visualization</span>
+          <h3 className="text-lg font-bold text-white mt-0.5">{title}</h3>
+        </div>
+      </div>
+
+      <div className="p-5 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-sky-300 font-mono overflow-x-auto leading-relaxed whitespace-pre shadow-inner">
+        {diagram || '+----------------------------------------------------------+\n|              System Architecture Data Flow               |\n+----------------------------------------------------------+'}
+      </div>
+
+      {explanation && (
+        <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 text-xs sm:text-sm text-slate-300 leading-relaxed">
+          <span className="font-semibold text-indigo-300">How it works: </span>
+          {explanation}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // 1. EVENT LOOP VISUALIZER

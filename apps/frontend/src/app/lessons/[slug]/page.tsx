@@ -417,7 +417,12 @@ export default function LessonPlayerPage() {
       {currentStageNumber === 2 && (
         <div className="flex-1 flex flex-col">
           <Badge variant="purple" className="mb-3 self-start">Stage 3: Interactive Architecture</Badge>
-          <ConceptVisualizer visualType={visualType} conceptTitle={lesson.concept.name} />
+          <ConceptVisualizer
+            visualType={visualType}
+            conceptTitle={lesson.concept.name}
+            diagram={visualAct?.diagram}
+            explanation={visualAct?.explanation}
+          />
         </div>
       )}
 

@@ -1,5 +1,7 @@
 import prisma from '../../config/prisma.js';
 import { AdaptiveEngine } from './adaptive-engine.js';
+import { SessionGeneratorService } from '../lessons/session-generator.service.js';
+import { logger } from '../../utils/logger.js';
 
 export class RecommendationsService {
   /**
@@ -43,11 +45,15 @@ export class RecommendationsService {
     const decision = await AdaptiveEngine.evaluateNextAction(userId);
     const stagesConfig = AdaptiveEngine.getTimeAdaptedConfig(decision.dailyMinutes);
 
-    // If lesson wasn't found directly on concept, check if any published lesson exists for THIS concept only
+    // If lesson wasn't found directly on concept, check if any published lesson exists for THIS concept and user
     let recommendedLesson = decision.lesson;
     if (!recommendedLesson && decision.concept) {
       recommendedLesson = await prisma.lesson.findFirst({
-        where: { conceptId: decision.concept.id, status: 'PUBLISHED' },
+        where: {
+          conceptId: decision.concept.id,
+          status: 'PUBLISHED',
+          OR: [{ userId }, { userId: null }]
+        },
         include: {
           quizzes: {
             take: 1,
@@ -55,6 +61,24 @@ export class RecommendationsService {
           }
         }
       });
+
+      // If still no lesson and prerequisites are satisfied, JIT generate session now
+      if (!recommendedLesson && decision.actionType !== 'PREREQUISITE') {
+        try {
+          recommendedLesson = await SessionGeneratorService.getOrCreateSession({
+            userId,
+            conceptId: decision.concept.id,
+            learnerProfile: {
+              dailyMinutes: decision.dailyMinutes || user?.profile?.dailyMinutes || 15,
+              experienceLevel: user?.profile?.experienceLevel || 'BEGINNER',
+              targetGoal: activeGoal?.title || 'Software Engineering',
+              targetRole: activeGoal?.targetRole?.name || 'Software Engineer'
+            }
+          });
+        } catch (err) {
+          logger.warn(`Fallback JIT session generation in recommendations failed: ${err.message}`);
+        }
+      }
     }
 
     // 4. Calculate weekly learning minutes and completed sessions
@@ -85,6 +109,54 @@ export class RecommendationsService {
     const completedConceptsCount = await prisma.userConcept.count({
       where: { userId, masteryScore: { gte: 70 } }
     });
+
+    // Terminal Path Completion state handling
+    if (decision.actionType === 'COMPLETED') {
+      return {
+        greeting: `Congratulations, ${user?.profile?.displayName || 'Learner'}!`,
+        goal: activeGoal ? {
+          id: activeGoal.id,
+          title: activeGoal.title,
+          targetRole: activeGoal.targetRole?.name || 'Software Engineer',
+          targetReadiness: 100
+        } : null,
+        streak: {
+          current: user?.streak?.currentStreak || 0,
+          longest: user?.streak?.longestStreak || 0
+        },
+        recommendedActivity: {
+          type: 'PATH_COMPLETED',
+          actionType: 'COMPLETED',
+          isPathCompleted: true,
+          title: 'Path Complete: All Milestones Mastered!',
+          concept: null,
+          lessonId: null,
+          lessonSlug: null,
+          estimatedMinutes: 0,
+          reason: decision.reason || 'You have successfully completed every milestone in your personalized path.',
+          dueReviewsCount: dueRecalls.length,
+          reviewConcept: dueRecalls[0]?.concept ? {
+            id: dueRecalls[0].concept.id,
+            name: dueRecalls[0].concept.name,
+            skillName: dueRecalls[0].concept.skill?.name
+          } : null,
+          pacingLabel: 'Path Completed',
+          includedStages: []
+        },
+        progress: {
+          completedConceptsCount,
+          weeklyMinutes: weeklyLearningMinutes,
+          overallMastery: totalMastery,
+          dailyMinutes: decision.dailyMinutes,
+          topSkills: userSkills.map(us => ({
+            id: us.skillId,
+            name: us.skill.name,
+            category: us.skill.category,
+            masteryScore: us.masteryScore
+          }))
+        }
+      };
+    }
 
     // Content unavailable recoverable state handling
     if (!recommendedLesson || decision.actionType === 'CONTENT_UNAVAILABLE') {
@@ -150,8 +222,8 @@ export class RecommendationsService {
         longest: user?.streak?.longestStreak || 0
       },
       recommendedActivity: {
-        type: decision.actionType === 'REVIEW' ? 'RECALL_AND_LESSON' : 'DAILY_LESSON',
-        actionType: decision.actionType, // ADVANCE, REINFORCE, REVIEW, PREREQUISITE
+        type: decision.actionType === 'REVIEW' ? 'RECALL_AND_LESSON' : decision.actionType === 'REMEDIATE' ? 'REMEDIATION_SESSION' : 'DAILY_LESSON',
+        actionType: decision.actionType, // ADVANCE, REINFORCE, REMEDIATE, REVIEW, PREREQUISITE
         title: recommendedLesson.title || decision.concept?.name || 'Daily Engineering Session',
         concept: decision.concept ? {
           id: decision.concept.id,
