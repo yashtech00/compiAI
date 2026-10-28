@@ -1,0 +1,174 @@
+/* Editorial Hero Section Staggered Entrance Animations & Styles */
+
+/* 1. Subtle Technical Black Grid Background */
+.hero-grid-pattern {
+  background-color: #ffffff;
+  background-image:
+    linear-gradient(rgba(23, 23, 23, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 23, 23, 0.055) 1px, transparent 1px);
+  background-size: 38px 38px;
+  background-position: center top;
+}
+
+/* Subtle central spotlight to ensure high readability for headline and central student */
+.hero-spotlight {
+  background: radial-gradient(
+    ellipse 70% 60% at 50% 36%,
+    rgba(255, 255, 255, 0.8) 0%,
+    rgba(255, 255, 255, 0.45) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+}
+
+/* 2. Coordinated Initial Entrance Animations */
+@keyframes heroFadeUp {
+  0% {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes heroFadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes heroIllustrationReveal {
+  0% {
+    opacity: 0;
+    transform: translateY(20px) scale(0.995);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Staggered entrance sequence */
+.hero-nav-reveal {
+  animation: heroFadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.hero-headline-line-1 {
+  opacity: 0;
+  animation: heroFadeUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.08s forwards;
+}
+
+.hero-headline-line-2 {
+  opacity: 0;
+  animation: heroFadeUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.16s forwards;
+}
+
+.hero-headline-line-3 {
+  opacity: 0;
+  animation: heroFadeUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.24s forwards;
+}
+
+.hero-copy-reveal {
+  opacity: 0;
+  animation: heroFadeUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.34s forwards;
+}
+
+.hero-cta-reveal {
+  opacity: 0;
+  animation: heroFadeUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.42s forwards;
+}
+
+.hero-illustration-reveal {
+  opacity: 0;
+  animation: heroIllustrationReveal 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.48s forwards;
+}
+
+/* 3. Vertical Rotating Headline Carousel Animations */
+.rotating-phrase-wrapper {
+  position: relative;
+  display: block;
+  height: 1.25em;
+  overflow: hidden;
+  width: 100%;
+}
+
+.rotating-phrase-item {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  white-space: nowrap;
+  will-change: transform, opacity;
+}
+
+/* Static stable state */
+.phrase-current {
+  transform: translateY(0%);
+  opacity: 1;
+}
+
+/* Seamless vertical transition: exits upward with custom ease */
+.phrase-exit-up {
+  animation: phraseExitUpAnim 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Seamless vertical transition: enters from below with custom ease */
+.phrase-enter-down {
+  animation: phraseEnterDownAnim 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes phraseExitUpAnim {
+  0% {
+    transform: translateY(0%);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-110%);
+    opacity: 0;
+  }
+}
+
+@keyframes phraseEnterDownAnim {
+  0% {
+    transform: translateY(110%);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0%);
+    opacity: 1;
+  }
+}
+
+/* 4. Respect User Reduced-Motion Preferences */
+@media (prefers-reduced-motion: reduce) {
+  .hero-nav-reveal,
+  .hero-headline-line-1,
+  .hero-headline-line-2,
+  .hero-headline-line-3,
+  .hero-copy-reveal,
+  .hero-cta-reveal,
+  .hero-illustration-reveal,
+  .phrase-exit-up,
+  .phrase-enter-down {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+
+  .rotating-phrase-wrapper {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .rotating-phrase-item {
+    position: relative !important;
+    inset: auto !important;
+  }
+}
