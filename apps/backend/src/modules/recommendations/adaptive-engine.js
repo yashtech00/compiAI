@@ -528,25 +528,28 @@ export class AdaptiveEngine {
       }
     }
 
-    // 7. Gather target skill IDs from the learner's active role or defaults
+    // 7. Gather target skill IDs from the learner's active role or all active skills
     let targetSkillIds = [];
     if (activeGoal?.targetRole?.roleSkills?.length > 0) {
       targetSkillIds = activeGoal.targetRole.roleSkills.map(rs => rs.skillId);
     } else {
-      const defaultSkills = await prisma.skill.findMany({
-        where: { slug: { in: ['javascript', 'backend-dev', 'databases', 'system-design', 'ai-engineering', 'rest-apis', 'postgresql'] } }
+      const allSkills = await prisma.skill.findMany({
+        select: { id: true }
       });
-      targetSkillIds = defaultSkills.map(s => s.id);
+      targetSkillIds = allSkills.map(s => s.id);
     }
 
-    // Load candidate concepts with prerequisites (scoped to shared reference concepts or user's custom concepts)
+    // Load candidate concepts with prerequisites (scoped to learner's custom concepts or shared reference concepts)
     const candidateConcepts = await prisma.concept.findMany({
       where: {
-        skillId: { in: targetSkillIds },
         status: 'ACTIVE',
         OR: [
-          { isCustom: false },
-          { userId }
+          // Custom concepts created for this learner (unrestricted by skillId)
+          { isCustom: true, userId },
+          // Reference concepts matching target skills (or all reference concepts if no skill restrictions)
+          ...(targetSkillIds.length > 0
+            ? [{ isCustom: false, skillId: { in: targetSkillIds } }]
+            : [{ isCustom: false }])
         ]
       },
       include: {
@@ -602,7 +605,39 @@ export class AdaptiveEngine {
 
     // CASE 4A: PREREQUISITE GAP DETECTED
     if (missingPrereq) {
-      const lesson = missingPrereq.lessons?.[0] || null;
+      let lesson = missingPrereq.lessons?.[0] || null;
+      if (!lesson) {
+        lesson = await prisma.lesson.findFirst({
+          where: {
+            conceptId: missingPrereq.id,
+            status: 'PUBLISHED',
+            OR: [{ userId }, { userId: null }]
+          },
+          include: {
+            concept: { include: { skill: true } },
+            activities: { orderBy: { sequenceOrder: 'asc' } },
+            quizzes: { where: { status: 'ACTIVE' }, include: { questions: true } }
+          }
+        });
+      }
+
+      if (!lesson) {
+        try {
+          lesson = await SessionGeneratorService.getOrCreateSession({
+            userId,
+            conceptId: missingPrereq.id,
+            learnerProfile: {
+              dailyMinutes,
+              experienceLevel: user?.profile?.experienceLevel || 'BEGINNER',
+              targetGoal: activeGoal?.title || 'Software Engineering',
+              targetRole: activeGoal?.targetRole?.name || 'Software Engineer'
+            }
+          });
+        } catch (err) {
+          logger.warn(`Failed to generate candidate prerequisite lesson for ${missingPrereq.name}: ${err.message}`);
+        }
+      }
+
       if (lesson) {
         const reason = `Foundational prerequisite gap detected: ${nextCandidate.name} requires ${missingPrereq.name}. Building mastery in ${missingPrereq.name} first ensures steady progress.`;
         await this._logRecommendation(userId, 'PREREQUISITE', missingPrereq.id, lesson.id, reason, dailyMinutes);

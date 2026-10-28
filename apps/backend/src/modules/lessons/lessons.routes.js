@@ -10,7 +10,13 @@ const router = Router();
 router.get('/', requireAuth, async (req, res, next) => {
   try {
     const lessons = await prisma.lesson.findMany({
-      where: { status: 'PUBLISHED' },
+      where: {
+        status: 'PUBLISHED',
+        OR: [
+          { userId: null },
+          { userId: req.user.id }
+        ]
+      },
       include: {
         concept: {
           include: { skill: true }

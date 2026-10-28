@@ -3,6 +3,9 @@ import { AiService } from '../ai/ai.service.js';
 import { logger } from '../../utils/logger.js';
 import { PathSynthesisService } from './path-synthesis.service.js';
 
+// In-flight generation lock to prevent concurrent races creating duplicate active paths
+const inFlightGenerations = new Map();
+
 export class RoadmapService {
   /**
    * Generates or regenerates an individualized, explainable personalized roadmap for a user
@@ -32,6 +35,22 @@ export class RoadmapService {
       }
     }
 
+    // 1. Guard against concurrent generation requests for the same user
+    const lockKey = `${userId}:${options.force ? 'force' : 'default'}`;
+    if (inFlightGenerations.has(lockKey)) {
+      return inFlightGenerations.get(lockKey);
+    }
+
+    const task = this._executeGenerateRoadmap(userId, options);
+    inFlightGenerations.set(lockKey, task);
+    try {
+      return await task;
+    } finally {
+      inFlightGenerations.delete(lockKey);
+    }
+  }
+
+  static async _executeGenerateRoadmap(userId, options = {}) {
     // 1. Fetch user's profile, active goal, userSkills, and userConcepts
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -68,15 +87,33 @@ export class RoadmapService {
       masteryMap.set(uc.conceptId, uc.masteryScore);
     }
 
-    // 2. Synthesize personalized learning path using AI / goal-adaptive synthesizer
-    const synthesized = await PathSynthesisService.synthesizePersonalizedPath({
-      goalTitle,
-      targetRole,
-      experienceLevel,
-      dailyMinutes,
-      knownSkills: knownSkillSlugs,
-      existingMastery: Object.fromEntries(masteryMap)
+    // Capture previous active path to evaluate safe milestone completion inheritance and failure fallback
+    const previousActivePath = await prisma.learningPath.findFirst({
+      where: { userId, status: 'ACTIVE' },
+      include: { items: true }
     });
+    const previousItems = previousActivePath?.items || [];
+
+    // 2. Synthesize personalized learning path using AI / goal-adaptive synthesizer with error protection
+    let synthesized;
+    try {
+      synthesized = await PathSynthesisService.synthesizePersonalizedPath({
+        goalTitle,
+        targetRole,
+        experienceLevel,
+        dailyMinutes,
+        knownSkills: knownSkillSlugs,
+        existingMastery: Object.fromEntries(masteryMap)
+      });
+    } catch (err) {
+      logger.error(`Personalized path synthesis error for user ${userId}: ${err.message}`);
+      // Preserve existing active path intact
+      if (previousActivePath) {
+        logger.warn(`Preserving existing active path (version ${previousActivePath.version}) intact due to synthesis failure.`);
+        throw new Error(`Path synthesis failed: ${err.message}. Your existing active path has been preserved.`);
+      }
+      throw err;
+    }
 
     // 3. Resolve or create concepts for all milestones
     const milestoneConcepts = [];
@@ -155,28 +192,65 @@ export class RoadmapService {
       }
     }
 
-    // 5. Build explainable roadmap items
-    const roadmapItemsData = milestoneConcepts.map(({ milestone, concept }, index) => {
+    // 5. Build explainable roadmap items with safe completion inheritance
+    // Requirement 5: Existing completed work is reused ONLY when the objective and completion criteria are genuinely equivalent.
+    // Changed prerequisites or objectives do NOT inherit completion.
+    const roadmapItemsData = [];
+    for (let index = 0; index < milestoneConcepts.length; index++) {
+      const { milestone, concept } = milestoneConcepts[index];
       const mastery = masteryMap.get(concept.id) || 0;
-      let status = 'PENDING';
-      let reason = milestone.whyThisMatters || `Required for ${milestone.title}`;
 
-      if (mastery >= 70) {
-        status = 'COMPLETED';
-        reason = `Mastered (${mastery}% score). Available for periodic recall.`;
-      } else if (index === 0 || (index > 0 && milestoneConcepts.slice(0, index).every(prev => (masteryMap.get(prev.concept.id) || 0) >= 60))) {
-        status = 'IN_PROGRESS';
-        reason = `Next recommended milestone in your ${milestone.title} journey. ${milestone.measurableObjective}`;
-      } else {
-        status = 'PENDING';
-        if (milestone.prerequisiteTopicSlugs?.length > 0) {
-          reason = `Builds upon: ${milestone.prerequisiteTopicSlugs.join(', ')}.`;
+      // Find previous item matching this concept or milestoneId
+      const prevMatchingItem = previousItems.find(pi =>
+        (pi.conceptId === concept.id || pi.milestoneId === milestone.topicSlug) &&
+        pi.status === 'COMPLETED'
+      );
+
+      let isLegitimatelyCompleted = false;
+      let completedDate = null;
+
+      if (prevMatchingItem) {
+        const prevObjective = prevMatchingItem.targetOutcome?.trim().toLowerCase();
+        const newObjective = milestone.measurableObjective?.trim().toLowerCase();
+        // Strict equivalence: only inherit if measurable objective matches
+        if (prevObjective && newObjective && prevObjective === newObjective) {
+          isLegitimatelyCompleted = true;
+          completedDate = prevMatchingItem.completedAt || new Date();
         } else {
-          reason = `Foundational milestone for ${goalTitle}.`;
+          logger.info(`Milestone "${milestone.title}" objective changed. Completion status not inherited.`);
         }
       }
 
-      return {
+      if (mastery >= 70) {
+        isLegitimatelyCompleted = true;
+        completedDate = completedDate || new Date();
+      }
+
+      let status = 'PENDING';
+      let reason = milestone.whyThisMatters || `Required for ${milestone.title}`;
+
+      if (isLegitimatelyCompleted) {
+        status = 'COMPLETED';
+        reason = prevMatchingItem && mastery < 70
+          ? `Milestone objective verified as completed in prior path revision.`
+          : `Mastered (${mastery}% score). Available for periodic recall.`;
+      } else {
+        // If all preceding items are completed, this is the current active milestone
+        const allPriorCompleted = index === 0 || roadmapItemsData.every(prev => prev.status === 'COMPLETED');
+        if (allPriorCompleted) {
+          status = 'IN_PROGRESS';
+          reason = `Next recommended milestone in your ${milestone.title} journey. ${milestone.measurableObjective}`;
+        } else {
+          status = 'PENDING';
+          if (milestone.prerequisiteTopicSlugs?.length > 0) {
+            reason = `Builds upon: ${milestone.prerequisiteTopicSlugs.join(', ')}.`;
+          } else {
+            reason = `Foundational milestone for ${goalTitle}.`;
+          }
+        }
+      }
+
+      roadmapItemsData.push({
         conceptId: concept.id,
         milestoneId: milestone.topicSlug,
         title: milestone.title,
@@ -192,9 +266,9 @@ export class RoadmapService {
         sequenceOrder: index + 1,
         status,
         reason,
-        completedAt: mastery >= 70 ? new Date() : null
-      };
-    });
+        completedAt: completedDate
+      });
+    }
 
     // 6. Persist LearningPath in PostgreSQL transaction with versioning
     const roadmap = await prisma.$transaction(async (tx) => {

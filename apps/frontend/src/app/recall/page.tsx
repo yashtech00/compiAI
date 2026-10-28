@@ -17,7 +17,7 @@ interface DueItem {
     id: string;
     name: string;
     description: string;
-    skill: { name: string };
+    skill?: { name: string } | null;
     lessons?: Array<{ slug: string }>;
   };
 }
@@ -129,7 +129,7 @@ export default function RecallPage() {
 
       <Card className="p-8 bg-white dark:bg-slate-900/90 border-slate-200 dark:border-slate-800 shadow-sm text-center">
         <Badge variant="purple" className="mb-3">
-          {current.concept.skill.name}
+          {current.concept.skill?.name || 'Milestone'}
         </Badge>
 
         <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">

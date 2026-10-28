@@ -30,7 +30,7 @@ interface LessonData {
   concept: {
     id: string;
     name: string;
-    skill: { name: string };
+    skill?: { name: string } | null;
   };
   activities: Array<{
     id: string;
@@ -335,7 +335,7 @@ export default function LessonPlayerPage() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wide">
-              {lesson.concept.skill.name} • {lesson.concept.name}
+              {lesson.concept?.skill?.name ? `${lesson.concept.skill.name} • ` : ''}{lesson.concept?.name || 'Milestone'}
             </span>
             <span className="text-xs text-slate-400">• {dailyMinutes}m session</span>
           </div>
