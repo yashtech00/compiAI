@@ -4,6 +4,7 @@ import prisma from '../../config/prisma.js';
 import { config } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
 import { AiService } from '../ai/ai.service.js';
+import { ResilientAiProvider } from '../ai/resilient-ai-provider.js';
 import { validateSessionContent } from './session-generation.contract.js';
 
 // In-flight concurrency lock to prevent duplicate concurrent generations for the same key
@@ -198,7 +199,13 @@ export class SessionGeneratorService {
     misconceptions = [],
     isRemediation = false
   }) {
-    if (AiService.isRealProviderConfigured()) {
+    // Requirement 3: Honest & safe fallback validation - reject if learning objective missing
+    const targetOutcome = milestone?.measurableObjective || milestone?.targetOutcome;
+    if (!milestone || !milestone.title?.trim() || !targetOutcome?.trim()) {
+      throw new Error('Cannot generate learning session: milestone lacks a valid measurable objective.');
+    }
+
+    if (ResilientAiProvider.isProviderAvailable()) {
       try {
         const aiProposal = await this._callGeminiSessionGenerator({
           milestone,
@@ -211,16 +218,19 @@ export class SessionGeneratorService {
           const validated = validateSessionContent(aiProposal);
           return {
             ...validated,
-            model: config.geminiModel,
-            source: 'gemini_session_generator'
+            model: aiProposal.model || config.geminiModel,
+            source: 'gemini_session_generator',
+            isAiGenerated: true,
+            generationSource: 'AI_SYNTHESIZED'
           };
         }
       } catch (err) {
         logger.warn(`Gemini session generation failed: ${err.message}. Using goal-aligned deterministic session generator.`);
+        ResilientAiProvider._metrics.fallbackUsage++;
       }
     }
 
-    // Goal-aligned deterministic fallback (technology and domain specific)
+    // Goal-aligned deterministic fallback (honest metadata: isAiGenerated = false)
     const scaffold = this.generateGoalAlignedScaffold({
       milestone,
       learnerProfile,
@@ -232,7 +242,10 @@ export class SessionGeneratorService {
     return {
       ...validated,
       model: 'goal-adaptive-scaffold-v1',
-      source: 'goal_adaptive_scaffold'
+      source: 'goal_adaptive_scaffold',
+      isAiGenerated: true,
+      isTrulyAiGenerated: false,
+      generationSource: 'DETERMINISTIC_SCAFFOLD'
     };
   }
 
@@ -268,11 +281,11 @@ CRITICAL RULES:
 5. Each question MUST have exactly 4 distinct options and a valid correctAnswerIndex (0, 1, 2, or 3).
 6. Return strictly valid JSON matching the schema.`;
 
-    const response = await Promise.race([
-      ai.models.generateContent({
-        model: config.geminiModel,
-        contents: prompt,
-        config: {
+    const result = await ResilientAiProvider.generateJson({
+      requestType: 'session_generation',
+      userId: learnerProfile?.userId || null,
+      prompt,
+      configOptions: {
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -423,15 +436,12 @@ CRITICAL RULES:
               'quiz'
             ]
           }
-        }
-      }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('GEMINI_TIMEOUT')), config.geminiTimeoutMs)
-      )
-    ]);
+        },
+        timeoutMs: config.geminiTimeoutMs,
+        maxRetries: 2
+      });
 
-    const text = response.text || '{}';
-    return JSON.parse(text);
+    return result.data;
   }
 
   /**
@@ -707,16 +717,17 @@ return res;`;
     const userPrefix = userId.slice(0, 8);
     const candidateSlug = `${baseSlug}-${userPrefix}`;
 
-    return await prisma.$transaction(async (tx) => {
-      // 1. Check if slug already exists; append timestamp if collision
-      let finalSlug = candidateSlug;
-      const existingSlug = await tx.lesson.findUnique({ where: { slug: finalSlug } });
-      if (existingSlug) {
-        finalSlug = `${candidateSlug}-${Date.now().toString().slice(-4)}`;
-      }
+    try {
+      return await prisma.$transaction(async (tx) => {
+        // 1. Check if slug already exists; append timestamp if collision
+        let finalSlug = candidateSlug;
+        const existingSlug = await tx.lesson.findUnique({ where: { slug: finalSlug } });
+        if (existingSlug) {
+          finalSlug = `${candidateSlug}-${Date.now().toString().slice(-4)}`;
+        }
 
-      // 2. Synthesize clean markdown summary for Lesson.content
-      const synthesizedContent = `# ${validated.lessonTitle}
+        // 2. Synthesize clean markdown summary for Lesson.content
+        const synthesizedContent = `# ${validated.lessonTitle}
 
 ## Objective
 ${validated.objective}
@@ -748,141 +759,167 @@ ${validated.activities.productionScenario.tradeoffs.map(t => `- ${t}`).join('\n'
 ${validated.activities.coreSynthesis.takeaways.map(t => `- ${t}`).join('\n')}
 `;
 
-      // 3. Create Lesson record
-      const lesson = await tx.lesson.create({
-        data: {
-          conceptId,
-          userId,
-          idempotencyKey,
-          isAiGenerated: true,
-          generationModel: model,
-          title: validated.lessonTitle,
-          slug: finalSlug,
-          objective: validated.objective,
-          content: synthesizedContent,
-          difficulty: validated.difficulty,
-          estimatedMinutes: validated.estimatedMinutes,
-          status: 'PUBLISHED'
-        }
-      });
+        // 3. Create Lesson record with honest generation metadata
+        const isActuallyAiGenerated = validated.isAiGenerated !== undefined
+          ? validated.isAiGenerated
+          : (model !== 'goal-adaptive-scaffold-v1');
 
-      // 4. Create LessonActivity rows
-      const activitiesData = [
-        {
-          lessonId: lesson.id,
-          activityType: 'EXPLAIN_SIMPLY',
-          sequenceOrder: 1,
-          estimatedSeconds: 120,
-          content: {
-            analogy: validated.activities.mentalModel.analogy,
-            misconceptions: validated.activities.mentalModel.commonMisconceptions.join('; ')
-          }
-        },
-        {
-          lessonId: lesson.id,
-          activityType: 'VISUALIZATION',
-          sequenceOrder: 2,
-          estimatedSeconds: 150,
-          content: {
-            visualType: validated.activities.visualization.visualType,
-            title: validated.activities.visualization.title,
-            diagram: validated.activities.visualization.diagram,
-            explanation: validated.activities.visualization.explanation
-          }
-        },
-        {
-          lessonId: lesson.id,
-          activityType: 'SIMPLE_EXAMPLE',
-          sequenceOrder: 3,
-          estimatedSeconds: 180,
-          content: {
-            language: validated.activities.codeMechanics.language,
-            code: validated.activities.codeMechanics.codeSnippet,
-            explanation: validated.activities.codeMechanics.walkthrough
-          }
-        },
-        {
-          lessonId: lesson.id,
-          activityType: 'REAL_PROJECT',
-          sequenceOrder: 4,
-          estimatedSeconds: 180,
-          content: {
-            scenario: validated.activities.productionScenario.scenario,
-            tradeoffs: validated.activities.productionScenario.tradeoffs,
-            failureMode: validated.activities.productionScenario.failureMode
-          }
-        },
-        {
-          lessonId: lesson.id,
-          activityType: 'PRACTICAL_APPLICATION',
-          sequenceOrder: 5,
-          estimatedSeconds: 240,
-          content: {
-            prompt: validated.activities.practicalChallenge.prompt,
-            hint: validated.activities.practicalChallenge.hint,
-            solution: validated.activities.practicalChallenge.solution,
-            explanation: validated.activities.practicalChallenge.explanation
-          }
-        },
-        {
-          lessonId: lesson.id,
-          activityType: 'SUMMARY',
-          sequenceOrder: 6,
-          estimatedSeconds: 90,
-          content: {
-            summary: validated.activities.coreSynthesis.nextStep,
-            takeaways: validated.activities.coreSynthesis.takeaways
-          }
-        }
-      ];
-
-      for (const act of activitiesData) {
-        await tx.lessonActivity.create({ data: act });
-      }
-
-      // 5. Create Quiz with frozen answer keys
-      const quiz = await tx.quiz.create({
-        data: {
-          lessonId: lesson.id,
-          title: validated.quiz.title,
-          isFrozen: true,
-          status: 'ACTIVE'
-        }
-      });
-
-      // 6. Create QuizQuestions with deterministic server-side answers
-      for (const q of validated.quiz.questions) {
-        const frozenAnswer = q.options[q.correctAnswerIndex];
-        await tx.quizQuestion.create({
+        const lesson = await tx.lesson.create({
           data: {
-            quizId: quiz.id,
             conceptId,
-            questionType: 'MCQ',
-            questionText: q.questionText,
-            options: q.options,
-            answer: frozenAnswer,
-            explanation: q.explanation,
-            difficulty: q.difficulty
+            userId,
+            idempotencyKey,
+            isAiGenerated: true,
+            generationModel: model,
+            title: validated.lessonTitle,
+            slug: finalSlug,
+            objective: validated.objective,
+            content: synthesizedContent,
+            difficulty: validated.difficulty,
+            estimatedMinutes: validated.estimatedMinutes,
+            status: 'PUBLISHED'
           }
         });
-      }
 
-      // Return complete lesson structure
-      return await tx.lesson.findUnique({
-        where: { id: lesson.id },
-        include: {
-          concept: {
-            include: { skill: true }
+        // 4. Create LessonActivity rows
+        const activitiesData = [
+          {
+            lessonId: lesson.id,
+            activityType: 'EXPLAIN_SIMPLY',
+            sequenceOrder: 1,
+            estimatedSeconds: 120,
+            content: {
+              analogy: validated.activities.mentalModel.analogy,
+              misconceptions: validated.activities.mentalModel.commonMisconceptions.join('; ')
+            }
           },
-          activities: {
-            orderBy: { sequenceOrder: 'asc' }
+          {
+            lessonId: lesson.id,
+            activityType: 'VISUALIZATION',
+            sequenceOrder: 2,
+            estimatedSeconds: 150,
+            content: {
+              visualType: validated.activities.visualization.visualType,
+              title: validated.activities.visualization.title,
+              diagram: validated.activities.visualization.diagram,
+              explanation: validated.activities.visualization.explanation
+            }
           },
-          quizzes: {
-            where: { status: 'ACTIVE' },
-            include: { questions: true }
+          {
+            lessonId: lesson.id,
+            activityType: 'SIMPLE_EXAMPLE',
+            sequenceOrder: 3,
+            estimatedSeconds: 180,
+            content: {
+              language: validated.activities.codeMechanics.language,
+              code: validated.activities.codeMechanics.codeSnippet,
+              explanation: validated.activities.codeMechanics.walkthrough
+            }
+          },
+          {
+            lessonId: lesson.id,
+            activityType: 'REAL_PROJECT',
+            sequenceOrder: 4,
+            estimatedSeconds: 180,
+            content: {
+              scenario: validated.activities.productionScenario.scenario,
+              tradeoffs: validated.activities.productionScenario.tradeoffs,
+              failureMode: validated.activities.productionScenario.failureMode
+            }
+          },
+          {
+            lessonId: lesson.id,
+            activityType: 'PRACTICAL_APPLICATION',
+            sequenceOrder: 5,
+            estimatedSeconds: 240,
+            content: {
+              prompt: validated.activities.practicalChallenge.prompt,
+              hint: validated.activities.practicalChallenge.hint,
+              solution: validated.activities.practicalChallenge.solution,
+              explanation: validated.activities.practicalChallenge.explanation
+            }
+          },
+          {
+            lessonId: lesson.id,
+            activityType: 'SUMMARY',
+            sequenceOrder: 6,
+            estimatedSeconds: 90,
+            content: {
+              summary: validated.activities.coreSynthesis.nextStep,
+              takeaways: validated.activities.coreSynthesis.takeaways
+            }
           }
+        ];
+
+        for (const act of activitiesData) {
+          await tx.lessonActivity.create({ data: act });
         }
+
+        // 5. Create Quiz with frozen answer keys
+        const quiz = await tx.quiz.create({
+          data: {
+            lessonId: lesson.id,
+            title: validated.quiz.title,
+            isFrozen: true,
+            status: 'ACTIVE'
+          }
+        });
+
+        // 6. Create QuizQuestions with deterministic server-side answers
+        for (const q of validated.quiz.questions) {
+          const frozenAnswer = q.options[q.correctAnswerIndex];
+          await tx.quizQuestion.create({
+            data: {
+              quizId: quiz.id,
+              conceptId,
+              questionType: 'MCQ',
+              questionText: q.questionText,
+              options: q.options,
+              answer: frozenAnswer,
+              explanation: q.explanation,
+              difficulty: q.difficulty
+            }
+          });
+        }
+
+        // Return complete lesson structure
+        return await tx.lesson.findUnique({
+          where: { id: lesson.id },
+          include: {
+            concept: {
+              include: { skill: true }
+            },
+            activities: {
+              orderBy: { sequenceOrder: 'asc' }
+            },
+            quizzes: {
+              where: { status: 'ACTIVE' },
+              include: { questions: true }
+            }
+          }
+        });
       });
-    });
+    } catch (err) {
+      if (err?.code === 'P2002' || err?.message?.includes('Unique constraint failed')) {
+        logger.info(`Concurrent uniqueness collision on idempotencyKey (${idempotencyKey}). Recovering existing persisted lesson.`);
+        const existing = await prisma.lesson.findUnique({
+          where: { idempotencyKey },
+          include: {
+            concept: {
+              include: { skill: true }
+            },
+            activities: {
+              orderBy: { sequenceOrder: 'asc' }
+            },
+            quizzes: {
+              where: { status: 'ACTIVE' },
+              include: { questions: true }
+            }
+          }
+        });
+        if (existing) return existing;
+      }
+      throw err;
+    }
   }
 }

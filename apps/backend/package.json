@@ -10,6 +10,8 @@
     "db:migrate": "prisma migrate dev --schema=prisma/schema.prisma",
     "db:migrate:deploy": "prisma migrate deploy --schema=prisma/schema.prisma",
     "db:seed": "node prisma/seed.js",
+    "db:seed:admin": "node prisma/seed-admin.js",
+    "seed:admin": "node prisma/seed-admin.js",
     "db:generate": "prisma generate --schema=prisma/schema.prisma",
     "db:studio": "prisma studio --schema=prisma/schema.prisma",
     "test": "vitest run --testTimeout=10000"

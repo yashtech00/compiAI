@@ -39,7 +39,7 @@ export async function requireAuth(req, res, next) {
   }
 }
 
-export async function optionalAuth(req, res, next) {
+export async function optionalAuth(req, next) {
   try {
     let token = req.cookies?.[COOKIE_NAME];
     if (!token && req.headers.authorization?.startsWith('Bearer ')) {

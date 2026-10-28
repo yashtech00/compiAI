@@ -102,52 +102,138 @@ router.get('/summary', requireAuth, async (req, res, next) => {
 });
 
 // GET /api/v1/analytics/skills
+// Roadmap-driven: Derives domain knowledge & skill breakdown strictly from the learner's active roadmap
 router.get('/skills', requireAuth, async (req, res, next) => {
   try {
     const userId = req.user.id;
 
-    const allSkills = await prisma.skill.findMany({
+    // 1. Fetch the learner's active roadmap and its items
+    const activePath = await prisma.learningPath.findFirst({
+      where: { userId, status: 'ACTIVE' },
       include: {
-        concepts: {
-          select: { id: true, name: true, difficulty: true }
-        },
-        userSkills: {
-          where: { userId }
+        items: {
+          include: {
+            concept: {
+              include: {
+                skill: true,
+                userConcepts: {
+                  where: { userId }
+                }
+              }
+            }
+          },
+          orderBy: { sequenceOrder: 'asc' }
         }
-      },
-      orderBy: { name: 'asc' }
+      }
     });
 
-    const userConcepts = await prisma.userConcept.findMany({
-      where: { userId }
-    });
-    const conceptMasteryMap = new Map();
-    for (const uc of userConcepts) {
-      conceptMasteryMap.set(uc.conceptId, uc.masteryScore);
+    if (!activePath || !activePath.items || activePath.items.length === 0) {
+      return successResponse(res, {
+        hasRoadmap: false,
+        roadmapTitle: null,
+        roadmapVersion: null,
+        skills: []
+      }, 'No active roadmap found for learner');
     }
 
-    const skillAnalytics = allSkills.map(skill => {
-      const userSkill = skill.userSkills[0];
-      const totalConcepts = skill.concepts.length;
-      const masteredConcepts = skill.concepts.filter(
-        c => (conceptMasteryMap.get(c.id) || 0) >= 75
-      ).length;
+    // 2. Fetch user's registered userSkill records for these skills
+    const userSkills = await prisma.userSkill.findMany({
+      where: { userId }
+    });
+    const userSkillMap = new Map();
+    for (const us of userSkills) {
+      userSkillMap.set(us.skillId, us);
+    }
+
+    // 3. Group roadmap items by Domain Skill (or Topic if custom/unlinked)
+    const domainMap = new Map();
+
+    for (const item of activePath.items) {
+      const skill = item.concept?.skill;
+      const groupKey = skill ? skill.id : (item.conceptId || item.id);
+      const groupName = skill ? skill.name : (item.title || item.concept?.name || 'Roadmap Topic');
+      const groupCategory = skill ? skill.category : (activePath.targetGoal || 'Core Engineering');
+      const groupSlug = skill ? skill.slug : (item.concept?.slug || `topic-${item.sequenceOrder}`);
+
+      if (!domainMap.has(groupKey)) {
+        domainMap.set(groupKey, {
+          id: groupKey,
+          name: groupName,
+          slug: groupSlug,
+          category: groupCategory,
+          difficulty: skill?.difficulty || 1,
+          items: []
+        });
+      }
+
+      domainMap.get(groupKey).items.push(item);
+    }
+
+    // 4. Calculate real metrics for each domain based strictly on active roadmap items
+    const skillAnalytics = Array.from(domainMap.values()).map(domain => {
+      const totalConcepts = domain.items.length;
+      const completedConcepts = domain.items.filter(i => i.status === 'COMPLETED').length;
+      const inProgressConcepts = domain.items.filter(i => i.status === 'IN_PROGRESS').length;
+
+      // Extract user concept telemetry for this domain's items
+      const assessedItems = domain.items.filter(i => {
+        const uc = i.concept?.userConcepts?.[0];
+        return uc && uc.attempts > 0;
+      });
+
+      const isAssessed = assessedItems.length > 0;
+      let masteryScore = null;
+      let confidenceScore = 0;
+
+      if (isAssessed) {
+        const totalMastery = assessedItems.reduce((acc, i) => acc + (i.concept.userConcepts[0].masteryScore || 0), 0);
+        const totalConfidence = assessedItems.reduce((acc, i) => acc + (i.concept.userConcepts[0].confidenceScore || 0), 0);
+        masteryScore = Math.round(totalMastery / assessedItems.length);
+        confidenceScore = Math.round(totalConfidence / assessedItems.length);
+      } else {
+        // Check if there is an explicit userSkill assessment
+        const us = userSkillMap.get(domain.id);
+        if (us && us.lastAssessedAt) {
+          masteryScore = Math.round(us.masteryScore);
+          confidenceScore = Math.round(us.confidenceScore);
+        }
+      }
+
+      const masteredConcepts = domain.items.filter(i => {
+        const uc = i.concept?.userConcepts?.[0];
+        return (uc?.masteryScore || 0) >= 75 || i.status === 'COMPLETED';
+      }).length;
+
+      let status = 'PLANNED';
+      if (completedConcepts === totalConcepts && totalConcepts > 0) {
+        status = 'COMPLETED';
+      } else if (completedConcepts > 0 || inProgressConcepts > 0 || isAssessed) {
+        status = 'IN_PROGRESS';
+      }
 
       return {
-        id: skill.id,
-        name: skill.name,
-        slug: skill.slug,
-        category: skill.category,
-        difficulty: skill.difficulty,
-        masteryScore: userSkill?.masteryScore || 0,
-        confidenceScore: userSkill?.confidenceScore || 0,
-        lastPracticedAt: userSkill?.lastPracticedAt || null,
+        id: domain.id,
+        name: domain.name,
+        slug: domain.slug,
+        category: domain.category,
+        difficulty: domain.difficulty,
+        isAssessed: masteryScore !== null,
+        masteryScore: masteryScore, // null if not assessed!
+        confidenceScore: confidenceScore,
+        status,
         totalConcepts,
+        completedConcepts,
         masteredConcepts
       };
     });
 
-    return successResponse(res, { skills: skillAnalytics }, 'Skill analytics loaded');
+    return successResponse(res, {
+      hasRoadmap: true,
+      roadmapTitle: activePath.title,
+      roadmapVersion: activePath.version,
+      completionPercentage: activePath.completionPercentage,
+      skills: skillAnalytics
+    }, 'Roadmap-driven skill analytics loaded');
   } catch (error) {
     next(error);
   }

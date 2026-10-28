@@ -14,20 +14,45 @@ import analyticsRoutes from '../modules/analytics/analytics.routes.js';
 import aiRoutes from '../modules/ai/ai.routes.js';
 import subscriptionsRoutes from '../modules/subscriptions/subscriptions.routes.js';
 import adminRoutes from '../modules/admin/admin.routes.js';
+import simulationsRoutes from '../modules/simulations/simulation.routes.js';
 import { successResponse } from '../utils/response.js';
 
 const apiRouter = Router();
 
+import { ResilientAiProvider } from '../modules/ai/resilient-ai-provider.js';
+
 // Health check endpoint
 apiRouter.get('/health', async (req, res, next) => {
   try {
-    await prisma.$queryRaw`SELECT 1`;
-    return successResponse(res, {
-      status: 'healthy',
-      database: 'connected',
-      timestamp: new Date().toISOString(),
-      version: '1.0.0'
-    }, 'System operational');
+    let dbStatus = 'connected';
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+    } catch (dbErr) {
+      dbStatus = 'disconnected';
+    }
+
+    const aiSnapshot = ResilientAiProvider.getObservabilitySnapshot();
+    const isCoreHealthy = dbStatus === 'connected';
+    const overallStatus = !isCoreHealthy ? 'unhealthy' : (aiSnapshot.status === 'degraded' ? 'degraded' : 'healthy');
+
+    const statusCode = isCoreHealthy ? 200 : 503;
+    return res.status(statusCode).json({
+      success: isCoreHealthy,
+      data: {
+        status: overallStatus,
+        database: dbStatus,
+        aiProvider: {
+          status: aiSnapshot.status,
+          circuitBreaker: aiSnapshot.circuitBreaker.state,
+          configuredModel: aiSnapshot.configuredModel,
+          isConfigured: aiSnapshot.isConfigured
+        },
+        observability: aiSnapshot.metrics,
+        timestamp: new Date().toISOString(),
+        version: '1.0.0'
+      },
+      message: isCoreHealthy ? 'System operational' : 'Database connectivity failed'
+    });
   } catch (error) {
     next(error);
   }
@@ -48,5 +73,6 @@ apiRouter.use('/analytics', analyticsRoutes);
 apiRouter.use('/ai', aiRoutes);
 apiRouter.use('/subscriptions', subscriptionsRoutes);
 apiRouter.use('/admin', adminRoutes);
+apiRouter.use('/simulations', simulationsRoutes);
 
 export default apiRouter;

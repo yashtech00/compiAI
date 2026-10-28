@@ -283,14 +283,21 @@ export class QuizService {
       let xpAmount = 0;
       if (!existingXp && isPassed) {
         xpAmount = scorePercentage === 100 ? 75 : 50;
-        await tx.xpTransaction.create({
-          data: {
-            userId,
-            sourceType: 'QUIZ',
-            sourceId: quiz.id,
-            amount: xpAmount
+        try {
+          await tx.xpTransaction.create({
+            data: {
+              userId,
+              sourceType: 'QUIZ',
+              sourceId: quiz.id,
+              amount: xpAmount
+            }
+          });
+        } catch (xpErr) {
+          // If concurrent request won the race, unique constraint [userId, sourceType, sourceId] handles idempotency
+          if (xpErr.code !== 'P2002') {
+            throw xpErr;
           }
-        });
+        }
       }
 
       // 8. Update Streak

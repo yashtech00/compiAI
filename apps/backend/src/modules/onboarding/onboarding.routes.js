@@ -41,16 +41,30 @@ router.get('/state', requireAuth, async (req, res, next) => {
 // POST /api/v1/onboarding/step
 const saveStepSchema = z.object({
   step: z.number().int().min(1).max(5),
-  goalTitle: z.string().optional(),
-  targetRoleId: z.string().uuid().optional(),
-  experienceLevel: z.enum(['BEGINNER', 'STUDENT', 'JUNIOR', 'INTERMEDIATE', 'ADVANCED']).optional(),
-  dailyMinutes: z.number().int().min(5).max(120).optional(),
+  goalTitle: z.string().trim().max(200).optional().nullable().or(z.literal('')),
+  targetRoleId: z.string().uuid().optional().nullable().or(z.literal('')),
+  experienceLevel: z.enum(['BEGINNER', 'STUDENT', 'JUNIOR', 'INTERMEDIATE', 'ADVANCED']).optional().nullable(),
+  dailyMinutes: z.number().int().min(5).max(120).optional().nullable(),
   knownSkillSlugs: z.array(z.string()).optional()
 });
 
 router.post('/step', requireAuth, async (req, res, next) => {
   try {
     const data = saveStepSchema.parse(req.body);
+
+    // Resolve sensible goal title and role ID if empty
+    const cleanRoleId = data.targetRoleId && data.targetRoleId.length > 10 ? data.targetRoleId : null;
+    let cleanGoalTitle = data.goalTitle?.trim() || '';
+
+    if (!cleanGoalTitle && cleanRoleId) {
+      const matchedRole = await prisma.targetRole.findUnique({ where: { id: cleanRoleId } });
+      if (matchedRole) {
+        cleanGoalTitle = `Master ${matchedRole.name}`;
+      }
+    }
+    if (!cleanGoalTitle) {
+      cleanGoalTitle = 'Software Engineering Path';
+    }
 
     await prisma.$transaction(async (tx) => {
       // 1. Update Profile step and preferences
@@ -65,30 +79,28 @@ router.post('/step', requireAuth, async (req, res, next) => {
         data: profileUpdate
       });
 
-      // 2. Update or create Learning Goal if provided
-      if (data.goalTitle || data.targetRoleId) {
-        const existingGoal = await tx.learningGoal.findFirst({
-          where: { userId: req.user.id, status: 'ACTIVE' }
-        });
+      // 2. Update or create Learning Goal
+      const existingGoal = await tx.learningGoal.findFirst({
+        where: { userId: req.user.id, status: 'ACTIVE' }
+      });
 
-        if (existingGoal) {
-          await tx.learningGoal.update({
-            where: { id: existingGoal.id },
-            data: {
-              title: data.goalTitle || existingGoal.title,
-              targetRoleId: data.targetRoleId || existingGoal.targetRoleId
-            }
-          });
-        } else {
-          await tx.learningGoal.create({
-            data: {
-              userId: req.user.id,
-              title: data.goalTitle || 'Become a Software Engineer',
-              targetRoleId: data.targetRoleId || null,
-              status: 'ACTIVE'
-            }
-          });
-        }
+      if (existingGoal) {
+        await tx.learningGoal.update({
+          where: { id: existingGoal.id },
+          data: {
+            title: cleanGoalTitle || existingGoal.title,
+            targetRoleId: cleanRoleId !== undefined ? cleanRoleId : existingGoal.targetRoleId
+          }
+        });
+      } else {
+        await tx.learningGoal.create({
+          data: {
+            userId: req.user.id,
+            title: cleanGoalTitle,
+            targetRoleId: cleanRoleId,
+            status: 'ACTIVE'
+          }
+        });
       }
 
       // 3. Save Known Skills as self-reported exposure WITHOUT fabricating mastery
