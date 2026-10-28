@@ -1,226 +1,423 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuth } from '@/lib/auth/AuthContext';
+import Link from 'next/link';
 import { apiClient } from '@/lib/api/client';
-import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { ShieldAlert, ShieldCheck, CheckCircle2, AlertTriangle, Users, BookOpen, Layers, RefreshCw } from 'lucide-react';
+import {
+  Users,
+  TrendingUp,
+  UserCheck,
+  GitFork,
+  CheckCircle2,
+  AlertTriangle,
+  Flame,
+  ArrowUpRight,
+  ArrowDownRight,
+  RefreshCw,
+  Compass,
+  ArrowRight,
+  Clock,
+  Filter
+} from 'lucide-react';
 
-interface CycleData {
-  hasCycle: boolean;
-  nodesChecked: number;
-  edgesChecked: number;
-  cycleDetails: string;
-}
-
-interface AdminSkill {
-  id: string;
-  name: string;
-  category: string;
-  difficulty: number;
-  description: string;
-  concepts?: Array<{
-    id: string;
-    name: string;
-    difficulty: string;
-  }>;
-}
-
-export default function AdminPage() {
-  const router = useRouter();
-  const { isAdmin, isLoading: authLoading } = useAuth();
-
-  const [stats, setStats] = useState<Record<string, number> | null>(null);
-  const [skills, setSkills] = useState<AdminSkill[]>([]);
-  const [cycleData, setCycleData] = useState<CycleData | null>(null);
+export default function AdminOverviewDashboard() {
+  const [data, setData] = useState<any>(null);
+  const [timeRange, setTimeRange] = useState('30d');
   const [isLoading, setIsLoading] = useState(true);
-  const [isValidatingCycles, setIsValidatingCycles] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadAdminData() {
-      if (!authLoading && !isAdmin) {
-        setIsLoading(false);
-        return;
-      }
+  const fetchOverview = async (range = timeRange, showRefresh = false) => {
+    if (showRefresh) setIsRefreshing(true);
+    else setIsLoading(true);
+    setError(null);
 
-      try {
-        const [statsRes, skillsRes, cycleRes] = await Promise.all([
-          apiClient('/admin/stats').catch(() => null),
-          apiClient('/admin/skills').catch(() => null),
-          apiClient('/admin/check-cycles').catch(() => null)
-        ]);
-
-        if (statsRes) setStats(statsRes);
-        if (skillsRes?.skills) setSkills(skillsRes.skills);
-        if (cycleRes) setCycleData(cycleRes);
-      } catch (err) {
-        console.error('Failed to load admin data:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    if (!authLoading) {
-      loadAdminData();
-    }
-  }, [authLoading, isAdmin]);
-
-  const handleValidateGraph = async () => {
-    setIsValidatingCycles(true);
     try {
-      const res = await apiClient('/admin/check-cycles');
-      setCycleData(res);
-    } catch (err) {
-      console.error('Graph validation error:', err);
+      const res = await apiClient(`/admin/overview?timeRange=${range}`);
+      setData(res);
+    } catch (err: any) {
+      console.error('Failed to load admin overview:', err);
+      setError(err?.message || 'Failed to load telemetry data');
     } finally {
-      setIsValidatingCycles(false);
+      setIsLoading(false);
+      setIsRefreshing(false);
     }
   };
 
-  if (authLoading || isLoading) {
+  useEffect(() => {
+    fetchOverview(timeRange);
+  }, [timeRange]);
+
+  if (isLoading) {
     return (
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="text-center text-slate-400">
-          <div className="animate-spin w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full mx-auto mb-3" />
-          Verifying administrative permissions...
+      <div className="space-y-6 animate-pulse">
+        <div className="h-10 bg-slate-200 dark:bg-slate-800 rounded-xl w-64" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
+            <div key={i} className="h-28 bg-white dark:bg-slate-900 border border-[#E7E7E7] dark:border-slate-800 rounded-2xl" />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 h-72 bg-white dark:bg-slate-900 border border-[#E7E7E7] dark:border-slate-800 rounded-2xl" />
+          <div className="h-72 bg-white dark:bg-slate-900 border border-[#E7E7E7] dark:border-slate-800 rounded-2xl" />
         </div>
       </div>
     );
   }
 
-  if (!isAdmin) {
+  if (error || !data) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-8 max-w-md mx-auto text-center">
-        <Card className="p-8 border-rose-900/50 bg-rose-950/20">
-          <ShieldAlert className="w-12 h-12 text-rose-400 mx-auto mb-4" />
-          <h1 className="text-xl font-bold text-white mb-2">Access Restricted</h1>
-          <p className="text-xs text-slate-400 mb-6">
-            You must be signed in as an administrator to access the curriculum management console.
-          </p>
-          <Button onClick={() => router.push('/today')}>Back to Dashboard</Button>
-        </Card>
-      </div>
+      <Card className="p-8 text-center bg-white dark:bg-slate-900 border-rose-200 dark:border-rose-900/50">
+        <AlertTriangle className="w-10 h-10 text-rose-500 mx-auto mb-3" />
+        <h2 className="text-base font-bold text-[#171717] dark:text-white mb-1">Failed to load learning intelligence</h2>
+        <p className="text-xs text-[#626262] mb-4">{error || 'Server error encountered.'}</p>
+        <Button onClick={() => fetchOverview(timeRange)} size="sm">Try Again</Button>
+      </Card>
     );
   }
 
+  const { kpis, funnel, trends, needsAttention, period } = data;
+
   return (
-    <div className="max-w-6xl mx-auto px-4 py-8 sm:py-12 w-full">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+    <div className="space-y-8">
+      {/* 1. Header with Global Filters */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1.5">
-            <Badge variant="purple">Admin Center</Badge>
-            <span className="text-xs text-slate-400">Curriculum & Telemetry</span>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs font-semibold text-[#315EF7] tracking-wide uppercase">Learning Intelligence</span>
+            <span className="text-xs text-[#8E8E8E]">•</span>
+            <span className="text-xs text-[#8E8E8E]">Live Decision Support</span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-            Curriculum Operations
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-[#171717] dark:text-white tracking-tight">
+            Platform Overview
           </h1>
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          isLoading={isValidatingCycles}
-          onClick={handleValidateGraph}
-          className="gap-2 shrink-0 border-indigo-500/30 text-indigo-300"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          Verify Prerequisite DAG
-        </Button>
+        {/* Global Time Range Filter */}
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <div className="flex items-center bg-white dark:bg-slate-900 p-1 rounded-xl border border-[#E7E7E7] dark:border-slate-800 shadow-sm">
+            {['7d', '30d', '90d', 'all'].map((range) => (
+              <button
+                key={range}
+                onClick={() => setTimeRange(range)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  timeRange === range
+                    ? 'bg-[#315EF7] text-white shadow-xs'
+                    : 'text-[#626262] hover:text-[#171717] hover:bg-[#F3F6FF]'
+                }`}
+              >
+                {range === 'all' ? 'All Time' : range.toUpperCase()}
+              </button>
+            ))}
+          </div>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fetchOverview(timeRange, true)}
+            disabled={isRefreshing}
+            className="h-9 w-9 p-0 flex items-center justify-center border-[#E7E7E7] dark:border-slate-800 bg-white"
+            title="Refresh metrics"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-[#626262] ${isRefreshing ? 'animate-spin' : ''}`} />
+          </Button>
+        </div>
       </div>
 
-      {/* Admin Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-        <Card className="p-4">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span>Total Users</span>
-            <Users className="w-4 h-4 text-indigo-400" />
+      {/* 2. Key Performance Indicators (Cards) */}
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Total Students */}
+        <Card className="p-4 sm:p-5 bg-white dark:bg-slate-900 border-[#E7E7E7] dark:border-slate-800 shadow-xs">
+          <div className="flex items-center justify-between text-xs text-[#626262] dark:text-slate-400 mb-1.5">
+            <span className="font-medium">Total Registered</span>
+            <Users className="w-4 h-4 text-[#315EF7]" />
           </div>
-          <div className="text-2xl font-bold text-white">{stats?.totalUsers || 0}</div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-[#171717] dark:text-white">
+              {kpis.totalStudents.value.toLocaleString()}
+            </span>
+          </div>
+          <p className="text-[11px] text-[#8E8E8E] mt-1">Learners across all cohorts</p>
         </Card>
-        <Card className="p-4">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span>Total Skills</span>
-            <BookOpen className="w-4 h-4 text-emerald-400" />
+
+        {/* Active Students in Period */}
+        <Card className="p-4 sm:p-5 bg-white dark:bg-slate-900 border-[#E7E7E7] dark:border-slate-800 shadow-xs">
+          <div className="flex items-center justify-between text-xs text-[#626262] dark:text-slate-400 mb-1.5">
+            <span className="font-medium">Active Learners</span>
+            <Flame className="w-4 h-4 text-[#F27405]" />
           </div>
-          <div className="text-2xl font-bold text-white">{stats?.totalSkills || 0}</div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-[#171717] dark:text-white">
+              {kpis.activeStudents.value.toLocaleString()}
+            </span>
+            {kpis.activeStudents.changePct !== 0 && (
+              <span className={`inline-flex items-center text-xs font-semibold ${
+                kpis.activeStudents.changePct > 0 ? 'text-emerald-600' : 'text-rose-600'
+              }`}>
+                {kpis.activeStudents.changePct > 0 ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
+                {Math.abs(kpis.activeStudents.changePct)}%
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-[#8E8E8E] mt-1">Logged activity in {timeRange}</p>
         </Card>
-        <Card className="p-4">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span>Concepts</span>
-            <Layers className="w-4 h-4 text-sky-400" />
+
+        {/* New Registrations */}
+        <Card className="p-4 sm:p-5 bg-white dark:bg-slate-900 border-[#E7E7E7] dark:border-slate-800 shadow-xs">
+          <div className="flex items-center justify-between text-xs text-[#626262] dark:text-slate-400 mb-1.5">
+            <span className="font-medium">New Registrations</span>
+            <UserCheck className="w-4 h-4 text-emerald-600" />
           </div>
-          <div className="text-2xl font-bold text-white">{stats?.totalConcepts || 0}</div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-[#171717] dark:text-white">
+              {kpis.newRegistrations.value.toLocaleString()}
+            </span>
+            {kpis.newRegistrations.changePct !== 0 && (
+              <span className={`inline-flex items-center text-xs font-semibold ${
+                kpis.newRegistrations.changePct > 0 ? 'text-emerald-600' : 'text-rose-600'
+              }`}>
+                {kpis.newRegistrations.changePct > 0 ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
+                {Math.abs(kpis.newRegistrations.changePct)}%
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-[#8E8E8E] mt-1">vs preceding period ({kpis.newRegistrations.previousValue})</p>
         </Card>
-        <Card className="p-4">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span>Learning Sessions</span>
-            <CheckCircle2 className="w-4 h-4 text-amber-400" />
+
+        {/* Roadmap Progress */}
+        <Card className="p-4 sm:p-5 bg-white dark:bg-slate-900 border-[#E7E7E7] dark:border-slate-800 shadow-xs">
+          <div className="flex items-center justify-between text-xs text-[#626262] dark:text-slate-400 mb-1.5">
+            <span className="font-medium">Avg Roadmap Progress</span>
+            <GitFork className="w-4 h-4 text-[#315EF7]" />
           </div>
-          <div className="text-2xl font-bold text-white">{stats?.totalSessions || 0}</div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-[#171717] dark:text-white">
+              {kpis.avgRoadmapCompletion.value}%
+            </span>
+          </div>
+          <p className="text-[11px] text-[#8E8E8E] mt-1">{kpis.roadmapStarted.value} learners with active path</p>
         </Card>
-        <Card className="p-4">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-            <span>Pro Subscribers</span>
-            <ShieldCheck className="w-4 h-4 text-purple-400" />
+
+        {/* Session Completion Rate */}
+        <Card className="p-4 sm:p-5 bg-white dark:bg-slate-900 border-[#E7E7E7] dark:border-slate-800 shadow-xs">
+          <div className="flex items-center justify-between text-xs text-[#626262] dark:text-slate-400 mb-1.5">
+            <span className="font-medium">Session Completion</span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
           </div>
-          <div className="text-2xl font-bold text-white">{stats?.proSubscriptions || 0}</div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-[#171717] dark:text-white">
+              {kpis.sessionCompletionRate.value}%
+            </span>
+          </div>
+          <p className="text-[11px] text-[#8E8E8E] mt-1">
+            {kpis.sessionCompletionRate.sessionsCompleted} completed of {kpis.sessionCompletionRate.sessionsStarted} started
+          </p>
+        </Card>
+
+        {/* Avg Quiz Score */}
+        <Card className="p-4 sm:p-5 bg-white dark:bg-slate-900 border-[#E7E7E7] dark:border-slate-800 shadow-xs">
+          <div className="flex items-center justify-between text-xs text-[#626262] dark:text-slate-400 mb-1.5">
+            <span className="font-medium">Avg Quiz Mastery</span>
+            <TrendingUp className="w-4 h-4 text-indigo-600" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-[#171717] dark:text-white">
+              {kpis.avgQuizScore.value}%
+            </span>
+          </div>
+          <p className="text-[11px] text-[#8E8E8E] mt-1">{kpis.avgQuizScore.attemptsCount} attempts in period</p>
+        </Card>
+
+        {/* Diagnostic Assessment Avg */}
+        <Card className="p-4 sm:p-5 bg-white dark:bg-slate-900 border-[#E7E7E7] dark:border-slate-800 shadow-xs">
+          <div className="flex items-center justify-between text-xs text-[#626262] dark:text-slate-400 mb-1.5">
+            <span className="font-medium">Diagnostic Avg</span>
+            <Compass className="w-4 h-4 text-sky-600" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-[#171717] dark:text-white">
+              {kpis.avgAssessmentScore.value}%
+            </span>
+          </div>
+          <p className="text-[11px] text-[#8E8E8E] mt-1">Initial knowledge baseline</p>
+        </Card>
+
+        {/* Disengaged Students */}
+        <Card className="p-4 sm:p-5 bg-white dark:bg-slate-900 border-[#E7E7E7] dark:border-slate-800 shadow-xs">
+          <div className="flex items-center justify-between text-xs text-[#626262] dark:text-slate-400 mb-1.5">
+            <span className="font-medium">At-Risk Learners</span>
+            <AlertTriangle className={`w-4 h-4 ${kpis.disengagedStudents.value > 10 ? 'text-rose-500' : 'text-amber-500'}`} />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-[#171717] dark:text-white">
+              {kpis.disengagedStudents.value}
+            </span>
+          </div>
+          <p className="text-[11px] text-[#8E8E8E] mt-1">No learning in &gt;7 days</p>
         </Card>
       </div>
 
-      {/* Prerequisite Cycle Diagnostic Box */}
-      {cycleData && (
-        <Card className="p-5 mb-8 bg-slate-900/60 border-slate-800">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                {cycleData.hasCycle ? (
-                  <Badge variant="warning">Prerequisite Cycle Detected</Badge>
-                ) : (
-                  <Badge variant="success">Directed Acyclic Graph (DAG) Valid</Badge>
-                )}
-                <span className="text-xs text-slate-400">
-                  {cycleData.nodesChecked} concepts, {cycleData.edgesChecked} prerequisite edges
-                </span>
-              </div>
-              <p className="text-xs text-slate-300 mt-1 leading-relaxed">{cycleData.cycleDetails}</p>
+      {/* 3. Actionable Insights: "Needs Attention" */}
+      {needsAttention && needsAttention.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#EA580C]" />
+              <h2 className="text-base font-bold text-[#171717] dark:text-white">Needs Attention</h2>
             </div>
-            <div className={`p-2 rounded-lg ${cycleData.hasCycle ? 'bg-rose-950/40 text-rose-400' : 'bg-emerald-950/40 text-emerald-400'}`}>
-              {cycleData.hasCycle ? <AlertTriangle className="w-5 h-5" /> : <ShieldCheck className="w-5 h-5" />}
-            </div>
+            <span className="text-xs text-[#8E8E8E]">Transparent rule-based detection</span>
           </div>
-        </Card>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {needsAttention.map((insight: any) => (
+              <Card
+                key={insight.id}
+                className={`p-4 bg-white dark:bg-slate-900 border transition-all hover:shadow-sm flex flex-col justify-between ${
+                  insight.severity === 'HIGH'
+                    ? 'border-rose-200 dark:border-rose-950/60'
+                    : 'border-amber-200 dark:border-amber-950/60'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                      insight.severity === 'HIGH'
+                        ? 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300'
+                        : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'
+                    }`}>
+                      {insight.severity} Priority
+                    </span>
+                    <span className="text-xs font-semibold text-[#171717] dark:text-white">{insight.metric}</span>
+                  </div>
+                  <h3 className="font-bold text-sm text-[#171717] dark:text-white mb-1 leading-snug">
+                    {insight.title}
+                  </h3>
+                  <p className="text-xs text-[#626262] dark:text-slate-400 leading-relaxed mb-3">
+                    {insight.description}
+                  </p>
+                </div>
+
+                <div className="pt-3 border-t border-[#F0F0F0] dark:border-slate-800 flex items-center justify-between">
+                  <span className="text-[11px] text-[#8E8E8E] truncate pr-2">
+                    Action: {insight.suggestedAction}
+                  </span>
+                  <Link
+                    href={insight.link}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-[#315EF7] hover:underline shrink-0"
+                  >
+                    Inspect <ArrowRight className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
       )}
 
-      {/* Skills and Concepts List */}
-      <div>
-        <h2 className="text-lg font-bold text-white mb-4">Curriculum Skills & Concept Units</h2>
-        <div className="space-y-3">
-          {skills.map((skill) => (
-            <Card key={skill.id} className="p-4 bg-slate-900/40">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-white text-sm">{skill.name}</span>
-                  <Badge variant="default" size="sm">{skill.category}</Badge>
-                  <span className="text-xs text-slate-500">Diff: {skill.difficulty}/5</span>
+      {/* 4. Student Learning Funnel & Daily Activity Trends */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Learning Funnel */}
+        <Card className="lg:col-span-2 p-5 sm:p-6 bg-white dark:bg-slate-900 border-[#E7E7E7] dark:border-slate-800">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="font-bold text-base text-[#171717] dark:text-white">Student Learning Funnel</h2>
+              <p className="text-xs text-[#626262] dark:text-slate-400 mt-0.5">
+                Conversion and drop-off across the learner progression journey
+              </p>
+            </div>
+            <Badge variant="default">All Time</Badge>
+          </div>
+
+          <div className="space-y-3 pt-2">
+            {funnel.map((stage: any, idx: number) => {
+              const maxCount = funnel[0]?.count || 1;
+              const barWidth = Math.max(8, Math.round((stage.count / maxCount) * 100));
+
+              return (
+                <div key={stage.id} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-[#171717] dark:text-white">{stage.label}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="font-bold text-[#171717] dark:text-white">{stage.count.toLocaleString()}</span>
+                      <span className="text-[11px] text-[#8E8E8E] w-12 text-right">
+                        {stage.overallConversion}%
+                      </span>
+                    </div>
+                  </div>
+                  <div className="w-full h-3 bg-[#F0F0F0] dark:bg-slate-800 rounded-full overflow-hidden flex">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        idx === 0
+                          ? 'bg-[#315EF7]'
+                          : idx < 4
+                          ? 'bg-[#4873FB]'
+                          : idx < 7
+                          ? 'bg-[#628BFF]'
+                          : 'bg-emerald-500'
+                      }`}
+                      style={{ width: `${barWidth}%` }}
+                    />
+                  </div>
+                  {idx > 0 && stage.dropOff > 0 && (
+                    <div className="flex justify-between text-[10px] text-[#A0A0A0] px-1">
+                      <span>Step Conversion: {stage.stepConversion}%</span>
+                      <span>Drop-off: -{stage.dropOff.toLocaleString()} learners</span>
+                    </div>
+                  )}
                 </div>
-                <span className="text-xs text-slate-400">
-                  {skill.concepts?.length || 0} concepts defined
-                </span>
+              );
+            })}
+          </div>
+        </Card>
+
+        {/* Engagement Trend Bars */}
+        <Card className="p-5 sm:p-6 bg-white dark:bg-slate-900 border-[#E7E7E7] dark:border-slate-800 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="font-bold text-base text-[#171717] dark:text-white">Engagement Activity</h2>
+                <p className="text-xs text-[#626262] dark:text-slate-400 mt-0.5">Sessions completed per interval</p>
               </div>
-              <p className="text-xs text-slate-400 mb-3">{skill.description}</p>
-              <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-800/80">
-                {skill.concepts?.map((c: any) => (
-                  <span key={c.id} className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                    {c.name} ({c.difficulty})
-                  </span>
-                ))}
-              </div>
-            </Card>
-          ))}
-        </div>
+            </div>
+
+            {/* Simple visual spark bar chart */}
+            <div className="h-44 flex items-end gap-1.5 pt-4 pb-2 border-b border-[#F0F0F0] dark:border-slate-800">
+              {trends.map((t: any, i: number) => {
+                const maxVal = Math.max(...trends.map((item: any) => item.completedSessions || item.activeUsers || 1));
+                const barHeight = Math.max(6, Math.round(((t.completedSessions || t.activeUsers || 0) / maxVal) * 100));
+
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center h-full justify-end group relative">
+                    {/* Tooltip */}
+                    <div className="absolute -top-10 hidden group-hover:flex flex-col items-center z-20 pointer-events-none">
+                      <div className="bg-[#171717] text-white text-[10px] px-2 py-1 rounded shadow-md whitespace-nowrap">
+                        {t.date}: {t.completedSessions} sessions ({t.activeUsers} active)
+                      </div>
+                    </div>
+                    <div
+                      className="w-full bg-[#315EF7]/80 hover:bg-[#315EF7] rounded-t transition-all"
+                      style={{ height: `${barHeight}%` }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex justify-between text-[10px] text-[#8E8E8E] pt-2">
+              <span>{trends[0]?.date || 'Start'}</span>
+              <span>{trends[trends.length - 1]?.date || 'Today'}</span>
+            </div>
+          </div>
+
+          <div className="pt-4 mt-4 border-t border-[#F0F0F0] dark:border-slate-800 flex items-center justify-between">
+            <span className="text-xs text-[#626262]">Total Sessions (Period)</span>
+            <span className="font-bold text-sm text-[#171717] dark:text-white">
+              {kpis.sessionCompletionRate.sessionsCompleted}
+            </span>
+          </div>
+        </Card>
       </div>
     </div>
   );
