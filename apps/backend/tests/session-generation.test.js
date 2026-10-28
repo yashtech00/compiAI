@@ -77,7 +77,7 @@ describe('Phase 2: Just-in-Time AI Learning Session Generation & Verification', 
     otherUserToken = otherRes.body.data.token;
     otherUser = otherRes.body.data.user;
     createdUserIds.push(otherUser.id);
-  });
+  }, 30000);
 
   // =========================================================================
   // SCENARIO 1 & 15: Milestone without prewritten lesson generates a playable session

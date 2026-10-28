@@ -535,7 +535,7 @@ describe('Phase 3: Adaptive Learning Intelligence — Evidence-Driven Personaliz
   // =========================================================================
   it('13. Backward Compatibility: Seeded reference lesson remains accessible and playable', async () => {
     const seededLesson = await prisma.lesson.findFirst({
-      where: { userId: null, status: 'PUBLISHED' },
+      where: { userId: null, status: 'PUBLISHED', quizzes: { some: {} } },
       include: { quizzes: true }
     });
 

@@ -36,7 +36,8 @@ describe('Learning Engine & Critical Paths', () => {
       .set('Authorization', `Bearer ${token}`);
 
     if (lessonsRes.body.data.lessons.length > 0) {
-      testLessonId = lessonsRes.body.data.lessons[0].id;
+      const lessonWithQuiz = lessonsRes.body.data.lessons.find(l => l.quizzes && l.quizzes.length > 0) || lessonsRes.body.data.lessons[0];
+      testLessonId = lessonWithQuiz.id;
     }
   });
 

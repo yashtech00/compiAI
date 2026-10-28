@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { config } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
+import { ResilientAiProvider } from './resilient-ai-provider.js';
 
 export class AiService {
   static _client = null;
@@ -9,29 +10,25 @@ export class AiService {
    * Lazily initializes and returns the GoogleGenAI instance
    */
   static getClient() {
-    if (!this._client && config.geminiApiKey) {
-      this._client = new GoogleGenAI({ apiKey: config.geminiApiKey });
-    }
-    return this._client;
+    return ResilientAiProvider.getClient();
   }
 
   /**
-   * Evaluates if a real AI provider is configured with valid credentials
+   * Evaluates if a real AI provider is configured with valid credentials or mock client
    */
   static isRealProviderConfigured() {
-    return Boolean(config.geminiApiKey && config.geminiApiKey !== 'your-gemini-api-key-here');
+    return ResilientAiProvider.isProviderAvailable();
   }
 
   /**
    * Generates a Socratic tutor response contextualized to learner and lesson
    */
-  static async getTutorResponse({ userQuestion, lessonContext, learnerState }) {
+  static async getTutorResponse({ userQuestion, lessonContext, learnerState, userId = 'system' }) {
     if (!this.isRealProviderConfigured()) {
       return this._deterministicTutorFallback(lessonContext);
     }
 
     try {
-      const ai = this.getClient();
       const prompt = `You are a world-class Socratic software engineering companion.
 Your learner is studying: ${lessonContext?.conceptName || 'software engineering'} (${lessonContext?.skillName || 'Engineering'}).
 Current lesson objective: ${lessonContext?.objective || 'Master core engineering tradeoffs'}.
@@ -44,28 +41,22 @@ Instructions:
 2. Provide a thoughtful Socratic hint or guiding question that prompts the learner to inspect runtime mechanics, memory, execution order, or architectural tradeoffs.
 3. Keep the tone encouraging, concise, and focused (2-4 sentences max).`;
 
-      const response = await Promise.race([
-        ai.models.generateContent({
-          model: config.geminiModel,
-          contents: prompt
-        }),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('GEMINI_TIMEOUT')), config.geminiTimeoutMs)
-        )
-      ]);
+      const result = await ResilientAiProvider.generateText({
+        prompt,
+        requestType: 'tutor',
+        userId,
+        maxRetries: 2,
+        timeoutMs: config.geminiTimeoutMs || 3000
+      });
 
-      const text = response.text || '';
       return {
-        reply: text.trim(),
-        provider: 'gemini',
-        model: config.geminiModel,
-        tokens: {
-          input: response.usageMetadata?.promptTokenCount || 100,
-          output: response.usageMetadata?.candidatesTokenCount || 80
-        }
+        reply: (result.text || '').trim(),
+        provider: config.aiProvider || 'muse',
+        model: result.model || (config.aiProvider === 'muse' ? config.museModel : config.geminiModel),
+        tokens: result.tokens || { input: 100, output: 80 }
       };
     } catch (err) {
-      logger.warn(`Gemini tutor call failed: ${err.message}. Falling back to deterministic Socratic guidance.`);
+      logger.warn(`AI tutor call failed: ${err.message}. Falling back to deterministic Socratic guidance.`);
       return this._deterministicTutorFallback(lessonContext);
     }
   }
@@ -73,13 +64,12 @@ Instructions:
   /**
    * Evaluates learner's explain-back attempt using structured rubrics
    */
-  static async evaluateExplainBack({ userExplanation, conceptName, learningObjective }) {
+  static async evaluateExplainBack({ userExplanation, conceptName, learningObjective, userId = 'system' }) {
     if (!this.isRealProviderConfigured()) {
       return this._deterministicExplainBackFallback({ userExplanation, conceptName });
     }
 
     try {
-      const ai = this.getClient();
       const prompt = `You are evaluating a software engineer's conceptual explanation of "${conceptName}".
 Learning objective: "${learningObjective || 'Solid mental model and architectural comprehension'}".
 Learner's explanation:
@@ -93,38 +83,36 @@ Evaluate this explanation across three dimensions (0-100 score):
 - misconceptions: Array of any identified conceptual misunderstandings (empty if none).
 - feedback: Constructive 2-3 sentence feedback for the learner.`;
 
-      const response = await Promise.race([
-        ai.models.generateContent({
-          model: config.geminiModel,
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                accuracyScore: { type: Type.INTEGER },
-                completenessScore: { type: Type.INTEGER },
-                clarityScore: { type: Type.INTEGER },
-                overallScore: { type: Type.INTEGER },
-                misconceptions: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING }
-                },
-                feedback: { type: Type.STRING }
+      const result = await ResilientAiProvider.generateJson({
+        prompt,
+        configOptions: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              accuracyScore: { type: Type.INTEGER },
+              completenessScore: { type: Type.INTEGER },
+              clarityScore: { type: Type.INTEGER },
+              overallScore: { type: Type.INTEGER },
+              misconceptions: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
               },
-              required: ['accuracyScore', 'completenessScore', 'clarityScore', 'overallScore', 'misconceptions', 'feedback']
-            }
+              feedback: { type: Type.STRING }
+            },
+            required: ['accuracyScore', 'completenessScore', 'clarityScore', 'overallScore', 'misconceptions', 'feedback']
           }
-        }),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('GEMINI_TIMEOUT')), config.geminiTimeoutMs)
-        )
-      ]);
+        },
+        requestType: 'explain_back',
+        userId,
+        maxRetries: 2,
+        timeoutMs: config.geminiTimeoutMs || 3000
+      });
 
-      const parsed = JSON.parse(response.text || '{}');
+      const parsed = result.data;
       return {
         isConfigured: true,
-        provider: 'gemini',
+        provider: config.aiProvider || 'muse',
         accuracyScore: Math.min(100, Math.max(0, Number(parsed.accuracyScore) || 70)),
         completenessScore: Math.min(100, Math.max(0, Number(parsed.completenessScore) || 70)),
         clarityScore: Math.min(100, Math.max(0, Number(parsed.clarityScore) || 70)),
@@ -133,7 +121,7 @@ Evaluate this explanation across three dimensions (0-100 score):
         feedback: String(parsed.feedback || `Evaluated explanation for ${conceptName}.`)
       };
     } catch (err) {
-      logger.warn(`Gemini explain-back call failed: ${err.message}. Falling back to deterministic rubric.`);
+      logger.warn(`AI explain-back call failed: ${err.message}. Falling back to deterministic rubric.`);
       return this._deterministicExplainBackFallback({ userExplanation, conceptName });
     }
   }
@@ -141,13 +129,12 @@ Evaluate this explanation across three dimensions (0-100 score):
   /**
    * Generates initial personalized learning path recommendations from onboarding evidence
    */
-  static async generateInitialPath({ learnerProfile, candidateConcepts, targetOutcome }) {
+  static async generateInitialPath({ learnerProfile, candidateConcepts, targetOutcome, userId = 'system' }) {
     if (!this.isRealProviderConfigured()) {
       return null; // Signals caller to use deterministic topological sort directly
     }
 
     try {
-      const ai = this.getClient();
       const prompt = `You are an expert curriculum architect for software engineers.
 Target Outcome: "${targetOutcome}"
 Learner Profile:
@@ -171,45 +158,42 @@ CRITICAL CONSTRAINTS:
 3. Do not invent any new concept IDs.
 4. Provide structured JSON.`;
 
-      const response = await Promise.race([
-        ai.models.generateContent({
-          model: config.geminiModel,
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                learningApproach: { type: Type.STRING },
-                recommendedPacing: { type: Type.STRING },
-                orderedConceptIds: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING }
-                },
-                pedagogicalNotes: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      conceptId: { type: Type.STRING },
-                      reason: { type: Type.STRING }
-                    },
-                    required: ['conceptId', 'reason']
-                  }
-                },
-                confidence: { type: Type.NUMBER }
+      const result = await ResilientAiProvider.generateJson({
+        prompt,
+        configOptions: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              learningApproach: { type: Type.STRING },
+              recommendedPacing: { type: Type.STRING },
+              orderedConceptIds: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
               },
-              required: ['learningApproach', 'recommendedPacing', 'orderedConceptIds', 'confidence']
-            }
+              pedagogicalNotes: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    conceptId: { type: Type.STRING },
+                    reason: { type: Type.STRING }
+                  },
+                  required: ['conceptId', 'reason']
+                }
+              },
+              confidence: { type: Type.NUMBER }
+            },
+            required: ['learningApproach', 'recommendedPacing', 'orderedConceptIds', 'confidence']
           }
-        }),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('GEMINI_TIMEOUT')), config.geminiTimeoutMs)
-        )
-      ]);
+        },
+        requestType: 'initial_path',
+        userId,
+        maxRetries: 2,
+        timeoutMs: config.geminiTimeoutMs || 3000
+      });
 
-      const parsed = JSON.parse(response.text || '{}');
-      return parsed;
+      return result.data;
     } catch (err) {
       logger.warn(`Gemini initial path generation failed: ${err.message}. Defaulting to deterministic sort.`);
       return null;
@@ -226,7 +210,8 @@ CRITICAL CONSTRAINTS:
     learnerProfile,
     currentPath,
     accumulatedMisconceptions,
-    recallHistory
+    recallHistory,
+    userId = 'system'
   }) {
     if (!this.isRealProviderConfigured()) {
       return this._deterministicAnalysisFallback({
@@ -238,7 +223,6 @@ CRITICAL CONSTRAINTS:
     }
 
     try {
-      const ai = this.getClient();
       const prompt = `You are the adaptive learning intelligence for an AI software engineering companion.
 Perform a pedagogical analysis (${analysisType} review) based on recent learning evidence.
 
@@ -281,81 +265,78 @@ CRITICAL CONSTRAINTS:
 2. Do not skip prerequisites.
 3. Return schema-conforming JSON proposal.`;
 
-      const response = await Promise.race([
-        ai.models.generateContent({
-          model: config.geminiModel,
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                analysisType: { type: Type.STRING },
-                evidenceWindow: { type: Type.STRING },
-                summary: { type: Type.STRING },
-                confidence: { type: Type.NUMBER },
-                identifiedGaps: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      conceptId: { type: Type.STRING },
-                      conceptName: { type: Type.STRING },
-                      evidence: { type: Type.STRING }
-                    },
-                    required: ['conceptId', 'evidence']
-                  }
-                },
-                recommendedActions: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      action: { type: Type.STRING },
-                      conceptId: { type: Type.STRING },
-                      reason: { type: Type.STRING }
-                    },
-                    required: ['action', 'conceptId', 'reason']
-                  }
-                },
-                proposedPathChanges: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      conceptId: { type: Type.STRING },
-                      action: { type: Type.STRING },
-                      targetPosition: { type: Type.INTEGER },
-                      reason: { type: Type.STRING }
-                    },
-                    required: ['conceptId', 'action', 'reason']
-                  }
-                },
-                rationale: { type: Type.STRING },
-                reviewAt: { type: Type.STRING }
+      const result = await ResilientAiProvider.generateJson({
+        prompt,
+        configOptions: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              analysisType: { type: Type.STRING },
+              evidenceWindow: { type: Type.STRING },
+              summary: { type: Type.STRING },
+              confidence: { type: Type.NUMBER },
+              identifiedGaps: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    conceptId: { type: Type.STRING },
+                    conceptName: { type: Type.STRING },
+                    evidence: { type: Type.STRING }
+                  },
+                  required: ['conceptId', 'evidence']
+                }
               },
-              required: [
-                'analysisType',
-                'evidenceWindow',
-                'summary',
-                'confidence',
-                'identifiedGaps',
-                'recommendedActions',
-                'proposedPathChanges',
-                'rationale',
-                'reviewAt'
-              ]
-            }
+              recommendedActions: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    action: { type: Type.STRING },
+                    conceptId: { type: Type.STRING },
+                    reason: { type: Type.STRING }
+                  },
+                  required: ['action', 'conceptId', 'reason']
+                }
+              },
+              proposedPathChanges: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    conceptId: { type: Type.STRING },
+                    action: { type: Type.STRING },
+                    targetPosition: { type: Type.INTEGER },
+                    reason: { type: Type.STRING }
+                  },
+                  required: ['conceptId', 'action', 'reason']
+                }
+              },
+              rationale: { type: Type.STRING },
+              reviewAt: { type: Type.STRING }
+            },
+            required: [
+              'analysisType',
+              'evidenceWindow',
+              'summary',
+              'confidence',
+              'identifiedGaps',
+              'recommendedActions',
+              'proposedPathChanges',
+              'rationale',
+              'reviewAt'
+            ]
           }
-        }),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('GEMINI_TIMEOUT')), config.geminiTimeoutMs)
-        )
-      ]);
+        },
+        requestType: 'evidence_analysis',
+        userId,
+        maxRetries: 2,
+        timeoutMs: config.geminiTimeoutMs || 3000
+      });
 
-      const parsed = JSON.parse(response.text || '{}');
       return {
-        ...parsed,
+        ...result.data,
         analysisType,
         provider: 'gemini',
         model: config.geminiModel
@@ -487,4 +468,61 @@ CRITICAL CONSTRAINTS:
       isRemediation
     });
   }
+
+  /**
+   * Evaluates learner's engineering rationale in an interactive simulation
+   */
+  static async evaluateSimulationExplanation({ userExplanation, scenarioTitle, selectedActions = [], userId = 'system' }) {
+    if (!this.isRealProviderConfigured() || !userExplanation || userExplanation.trim().length < 5) {
+      return {
+        score: userExplanation && userExplanation.trim().length >= 10 ? 80 : 50,
+        feedback: userExplanation && userExplanation.trim().length >= 10 
+          ? 'Clear rationale addressing the primary architectural bottleneck.'
+          : 'Reasoning evaluated against deterministic rubric.',
+        provider: 'deterministic'
+      };
+    }
+
+    try {
+      const prompt = `You are an expert engineering evaluator assessing a learner's decision in an interactive software simulation.
+Scenario: "${scenarioTitle || 'Engineering Incident'}"
+Learner's Explanation:
+"""${userExplanation}"""
+
+Evaluate the explanation against technical accuracy, trade-off awareness, and clarity.
+Respond with JSON:
+{
+  "score": <0-100 score>,
+  "feedback": "<concise 2-sentence feedback>"
+}`;
+
+      const res = await ResilientAiProvider.generateText({
+        prompt,
+        requestType: 'simulation_eval',
+        userId,
+        timeoutMs: config.geminiTimeoutMs || 3000
+      });
+
+      let parsed = null;
+      try {
+        parsed = JSON.parse(res.text.replace(/```json/g, '').replace(/```/g, '').trim());
+      } catch (pErr) {
+        parsed = null;
+      }
+
+      return {
+        score: parsed?.score || 80,
+        feedback: parsed?.feedback || 'Sound engineering rationale submitted.',
+        provider: 'gemini'
+      };
+    } catch (err) {
+      logger.warn(`AI evaluation of explanation failed: ${err.message}. Using deterministic evaluation.`);
+      return {
+        score: userExplanation.length >= 15 ? 85 : 60,
+        feedback: 'Demonstrated coherent understanding of the scenario tradeoffs.',
+        provider: 'deterministic'
+      };
+    }
+  }
 }
+

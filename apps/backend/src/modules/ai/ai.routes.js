@@ -75,7 +75,8 @@ router.post('/tutor', requireAuth, async (req, res, next) => {
       learnerState: {
         userId: req.user.id,
         name: req.user.profile?.displayName
-      }
+      },
+      userId: req.user.id
     });
 
     // 5. Save assistant reply
@@ -127,7 +128,7 @@ router.get('/conversations/:lessonId', requireAuth, async (req, res, next) => {
 // POST /api/v1/ai/explain-back
 const explainBackSchema = z.object({
   conceptId: z.string().uuid(),
-  userExplanation: z.string().trim().min(10, 'Please write at least a few sentences explaining the concept.')
+  userExplanation: z.string().trim().min(10, 'Please write at least a few sentences explaining the concept.').max(5000, 'Explanation cannot exceed 5000 characters.')
 });
 
 router.post('/explain-back', requireAuth, async (req, res, next) => {
@@ -146,7 +147,8 @@ router.post('/explain-back', requireAuth, async (req, res, next) => {
     const evaluation = await AiService.evaluateExplainBack({
       userExplanation,
       conceptName: concept.name,
-      learningObjective: concept.description
+      learningObjective: concept.description,
+      userId: req.user.id
     });
 
     // Save ExplainBackAttempt and update learner model in transaction
