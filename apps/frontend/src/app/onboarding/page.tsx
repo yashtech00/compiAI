@@ -5,114 +5,100 @@ import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api/client';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
-import { ProgressBar } from '@/components/ui/ProgressBar';
-import { ArrowRight, ArrowLeft, Check } from 'lucide-react';
+import { ArrowRight, ArrowLeft, Check, Sparkles } from 'lucide-react';
 
-interface TargetRole {
+interface Role {
   id: string;
   name: string;
-  slug: string;
   description: string;
+  slug: string;
 }
 
 export default function OnboardingPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
-  const [roles, setRoles] = useState<TargetRole[]>([]);
-  const [selectedRole, setSelectedRole] = useState<TargetRole | null>(null);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [goalTitle, setGoalTitle] = useState('');
-  const [experienceLevel, setExperienceLevel] = useState('BEGINNER');
   const [dailyMinutes, setDailyMinutes] = useState(15);
+  const [experienceLevel, setExperienceLevel] = useState('INTERMEDIATE');
   const [knownSkills, setKnownSkills] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Available skills from curated catalogue
-  const skillOptions = [
-    { slug: 'javascript', label: 'JavaScript' },
-    { slug: 'nodejs', label: 'Node.js' },
-    { slug: 'rest-apis', label: 'REST APIs' },
-    { slug: 'postgresql', label: 'SQL & Databases' },
-    { slug: 'redis', label: 'In-Memory Caching' },
-    { slug: 'system-design', label: 'System Design' },
-    { slug: 'ai-engineering', label: 'AI Engineering' }
-  ];
-
-  const experienceOptions = [
-    { value: 'BEGINNER', label: 'Beginner', desc: 'Starting from fundamentals or transitioning into programming' },
-    { value: 'INTERMEDIATE', label: 'Some practical experience', desc: 'Built side projects, understand core syntax and web concepts' },
-    { value: 'ADVANCED', label: 'Working software engineer', desc: 'Writing production code; preparing for senior roles and system design' }
-  ];
-
   useEffect(() => {
-    async function loadInitialData() {
-      setIsLoading(true);
+    async function fetchInitialData() {
       try {
-        const [rolesData, stateData] = await Promise.all([
-          apiClient('/roles'),
-          apiClient('/onboarding/state').catch(() => null)
-        ]);
-
-        if (rolesData?.roles) {
-          setRoles(rolesData.roles);
-          if (!selectedRole && rolesData.roles.length > 0) {
-            setSelectedRole(rolesData.roles[0]);
-            setGoalTitle(`Become a ${rolesData.roles[0].name}`);
-          }
-        }
-
-        if (stateData) {
-          if (stateData.currentStep && stateData.currentStep > 1) {
-            setStep(Math.min(3, stateData.currentStep));
-          }
-          if (stateData.activeGoal?.targetRole) {
-            setSelectedRole(stateData.activeGoal.targetRole);
-            setGoalTitle(stateData.activeGoal.title);
-          }
-          if (stateData.profile?.experienceLevel) {
-            setExperienceLevel(stateData.profile.experienceLevel);
-          }
-          if (stateData.profile?.dailyMinutes) {
-            setDailyMinutes(stateData.profile.dailyMinutes);
-          }
-          if (stateData.knownSkills) {
-            setKnownSkills(stateData.knownSkills);
+        const rolesRes = await apiClient('/roles');
+        if (rolesRes && rolesRes.roles) {
+          setRoles(rolesRes.roles);
+          if (rolesRes.roles.length > 0) {
+            setSelectedRole(rolesRes.roles[0]);
+            setGoalTitle(`Become a ${rolesRes.roles[0].name}`);
           }
         }
       } catch (err) {
-        console.error('Failed to load onboarding state:', err);
+        console.error('Failed to load roles during onboarding:', err);
       } finally {
         setIsLoading(false);
       }
     }
-    loadInitialData();
+    fetchInitialData();
   }, []);
+
+  const experienceOptions = [
+    {
+      value: 'BEGINNER',
+      label: 'Beginner / Transitioning',
+      desc: 'Building my foundation. I want step-by-step guidance without skipping core basics.'
+    },
+    {
+      value: 'INTERMEDIATE',
+      label: 'Practicing Engineer',
+      desc: 'Comfortable with programming. Looking for deeper system depth and production intuition.'
+    },
+    {
+      value: 'ADVANCED',
+      label: 'Senior / Staff Track',
+      desc: 'Focus on high-leverage trade-offs, scalability, distributed failures, and technical leadership.'
+    }
+  ];
+
+  const skillOptions = [
+    { slug: 'system-design', label: 'System Design & Distributed Architectures' },
+    { slug: 'databases', label: 'Database Indexing, Sharding & Query Optimization' },
+    { slug: 'concurrency', label: 'Event Loops, Concurrency & Async I/O' },
+    { slug: 'caching', label: 'Caching Strategies, Invalidation & CDNs' },
+    { slug: 'networking', label: 'HTTP/3, gRPC, WebSockets & TCP Fundamentals' },
+    { slug: 'security', label: 'Auth, Encryption, OWASP & API Gateway Security' }
+  ];
 
   const handleNextStep = async () => {
     setIsSaving(true);
     try {
-      await apiClient('/onboarding/step', {
-        method: 'POST',
-        body: JSON.stringify({
-          step,
-          goalTitle,
-          targetRoleId: selectedRole?.id,
-          experienceLevel,
-          dailyMinutes,
-          knownSkillSlugs: knownSkills
-        })
-      });
-
-      if (step < 3) {
-        setStep(step + 1);
-      } else {
-        // Complete onboarding and proceed to diagnostic assessment
-        await apiClient('/onboarding/complete', { method: 'POST' });
-        router.push('/assessment');
+      if (step === 1) {
+        await apiClient('/onboarding/step', {
+          method: 'POST',
+          body: JSON.stringify({
+            step: 1,
+            targetRoleId: selectedRole?.id,
+            goalTitle
+          })
+        });
+        setStep(2);
+      } else if (step === 2) {
+        await apiClient('/onboarding/step', {
+          method: 'POST',
+          body: JSON.stringify({
+            step: 2,
+            experienceLevel,
+            dailyMinutes
+          })
+        });
+        setStep(3);
       }
     } catch (err) {
-      console.error('Error saving onboarding step:', err);
+      console.error('Failed to persist onboarding step:', err);
     } finally {
       setIsSaving(false);
     }
@@ -129,59 +115,93 @@ export default function OnboardingPage() {
   if (isLoading) {
     return (
       <div className="flex-1 flex items-center justify-center p-8">
-        <div className="animate-spin w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full" />
+        <div className="animate-spin w-8 h-8 border-2 border-[#111111] border-t-transparent rounded-full" />
       </div>
     );
   }
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-4 py-12 max-w-2xl mx-auto w-full">
-      {/* Progress Bar & Header */}
+      {/* Step Indicators & Progress */}
       <div className="w-full mb-8">
-        <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
-          <span>Step {step} of 3</span>
-          <span>{progressPercent}% Complete</span>
+        <div className="flex items-center justify-between text-xs font-bold text-[#686860] mb-2">
+          <span className="flex items-center gap-1.5 text-[#111111]">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#d8ff19] border border-[#111111]" />
+            Step {step} of 3
+          </span>
+          <span className="text-[#111111] font-black">{progressPercent}% Calibrated</span>
         </div>
-        <ProgressBar value={progressPercent} color="indigo" size="sm" />
+        <div className="w-full h-2 rounded-full bg-[#F1F1EC] overflow-hidden">
+          <div
+            className="h-full rounded-full bg-[#111111] transition-all duration-300"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
       </div>
 
-      <Card className="w-full p-6 sm:p-8">
-        {/* STEP 1: WHAT DO YOU WANT TO GET BETTER AT? */}
+      <Card className="w-full p-6 sm:p-9 bg-white border border-[#d9d9d2] shadow-sm rounded-3xl">
+        {/* STEP 1: TARGET ROLE & GOAL */}
         {step === 1 && (
           <div>
             <div className="mb-6">
-              <Badge variant="purple" className="mb-2">Goal Selection</Badge>
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">What do you want to get better at?</h2>
-              <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                Choose your target focus. We will build an explainable concept dependency graph specifically tailored to your goal.
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#d8ff19]/30 text-[#111111] text-xs font-black mb-2.5 border border-[#111111]/20">
+                <Sparkles className="w-3 h-3 text-[#111111]" />
+                Target Direction
+              </span>
+              <h2 className="text-2xl sm:text-[26px] font-black text-[#111111] tracking-tight">
+                What role do you want to master?
+              </h2>
+              <p className="text-sm text-[#686860] mt-1.5 leading-relaxed font-medium">
+                Choose your focus. Our adaptive engine constructs a prerequisite graph tailored specifically to your goal so you stand out.
               </p>
             </div>
 
-            <div className="space-y-3 mb-6">
-              {roles.map(role => {
-                const isSelected = selectedRole?.id === role.id;
-                return (
-                  <div
-                    key={role.id}
-                    onClick={() => {
-                      setSelectedRole(role);
-                      setGoalTitle(`Become a ${role.name}`);
-                    }}
-                    className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                      isSelected
-                        ? 'border-indigo-500 bg-indigo-50/80 dark:bg-indigo-950/40 shadow-sm'
-                        : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-950/40'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-slate-900 dark:text-slate-100 text-sm">{role.name}</span>
-                      {isSelected && <Check className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />}
+            {roles.length > 0 ? (
+              <div className="space-y-3 mb-6">
+                {roles.map(role => {
+                  const isSelected = selectedRole?.id === role.id;
+                  return (
+                    <div
+                      key={role.id}
+                      onClick={() => {
+                        setSelectedRole(role);
+                        setGoalTitle(`Become a ${role.name}`);
+                      }}
+                      className={`p-4 rounded-2xl border cursor-pointer transition-all ${
+                        isSelected
+                          ? 'border-[#111111] bg-[#d8ff19]/20 shadow-sm ring-1 ring-[#111111]'
+                          : 'border-[#d9d9d2] hover:border-[#111111] bg-white'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className={`font-black text-sm text-[#111111]`}>
+                          {role.name}
+                        </span>
+                        {isSelected && (
+                          <div className="w-5 h-5 rounded-full bg-[#111111] flex items-center justify-center text-[#d8ff19]">
+                            <Check className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-xs text-[#686860] mt-1 leading-relaxed font-medium">{role.description}</p>
                     </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">{role.description}</p>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="p-4 bg-[#F8F8F4] rounded-2xl border border-[#d9d9d2] mb-6">
+                <p className="text-xs text-[#686860] mb-3 font-medium">
+                  No predefined roles published yet. Enter your custom learning target or career objective below:
+                </p>
+                <input
+                  type="text"
+                  placeholder="e.g. Full-Stack Web Development, Data Science, AI Systems"
+                  value={goalTitle}
+                  onChange={e => setGoalTitle(e.target.value)}
+                  className="w-full px-3.5 py-2 text-sm rounded-xl border border-[#d9d9d2] bg-white text-[#111111] focus:outline-none focus:ring-1 focus:ring-[#111111]"
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -189,17 +209,21 @@ export default function OnboardingPage() {
         {step === 2 && (
           <div>
             <div className="mb-6">
-              <Badge variant="purple" className="mb-2">Pacing & Experience</Badge>
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Pacing and Current Background</h2>
-              <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                Learning is most effective when done consistently in bite-sized daily sessions that fit your real schedule.
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#d8ff19]/30 text-[#111111] text-xs font-black mb-2.5 border border-[#111111]/20">
+                Pacing &amp; Experience
+              </span>
+              <h2 className="text-2xl sm:text-[26px] font-black text-[#111111] tracking-tight">
+                Pacing and Current Background
+              </h2>
+              <p className="text-sm text-[#686860] mt-1.5 leading-relaxed font-medium">
+                Adaptive learning thrives on sustainable daily micro-sessions that fit into your actual schedule without burnout.
               </p>
             </div>
 
             {/* Daily Time Preference: 10, 15, 20 */}
             <div className="mb-6">
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
-                Daily Time Preference
+              <label className="block text-xs font-bold text-[#111111] uppercase tracking-wider mb-2.5">
+                Daily Learning Commitment
               </label>
               <div className="grid grid-cols-3 gap-3">
                 {[10, 15, 20].map(mins => (
@@ -207,14 +231,16 @@ export default function OnboardingPage() {
                     key={mins}
                     type="button"
                     onClick={() => setDailyMinutes(mins)}
-                    className={`py-3 px-3 rounded-xl border text-center transition-all ${
+                    className={`py-3 px-3 rounded-2xl border text-center transition-all ${
                       dailyMinutes === mins
-                        ? 'bg-indigo-600 border-indigo-500 text-white shadow-md'
-                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-300 hover:border-slate-300 dark:hover:bg-slate-800'
+                        ? 'bg-[#111111] border-[#111111] text-[#d8ff19] font-black shadow-sm'
+                        : 'border-[#d9d9d2] bg-white text-[#111111] hover:border-[#111111] hover:bg-[#F8F8F4]'
                     }`}
                   >
-                    <div className="text-base font-bold">{mins} min</div>
-                    <div className="text-[10px] opacity-80">per day</div>
+                    <div className="text-base font-black">{mins} min</div>
+                    <div className={`text-[10px] ${dailyMinutes === mins ? 'text-[#d8ff19]/80' : 'text-[#686860]'}`}>
+                      per day
+                    </div>
                   </button>
                 ))}
               </div>
@@ -222,25 +248,31 @@ export default function OnboardingPage() {
 
             {/* Self-reported Experience Level */}
             <div className="mb-6">
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
-                Current Experience Level
+              <label className="block text-xs font-bold text-[#111111] uppercase tracking-wider mb-2.5">
+                Current Practical Experience
               </label>
               <div className="space-y-2.5">
                 {experienceOptions.map(exp => (
                   <div
                     key={exp.value}
                     onClick={() => setExperienceLevel(exp.value)}
-                    className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                    className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
                       experienceLevel === exp.value
-                        ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 text-slate-900 dark:text-white font-medium'
-                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:bg-slate-800'
+                        ? 'border-[#111111] bg-[#d8ff19]/20 shadow-sm ring-1 ring-[#111111]'
+                        : 'border-[#d9d9d2] bg-white hover:border-[#111111] hover:bg-[#F8F8F4]'
                     }`}
                   >
-                    <div className="flex items-center justify-between text-xs font-semibold">
-                      <span>{exp.label}</span>
-                      {experienceLevel === exp.value && <Check className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />}
+                    <div className="flex items-center justify-between text-xs font-black">
+                      <span className="text-[#111111]">
+                        {exp.label}
+                      </span>
+                      {experienceLevel === exp.value && (
+                        <div className="w-4 h-4 rounded-full bg-[#111111] flex items-center justify-center text-[#d8ff19]">
+                          <Check className="w-3 h-3" />
+                        </div>
+                      )}
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{exp.desc}</p>
+                    <p className="text-[11px] text-[#686860] mt-0.5 font-medium">{exp.desc}</p>
                   </div>
                 ))}
               </div>
@@ -252,14 +284,18 @@ export default function OnboardingPage() {
         {step === 3 && (
           <div>
             <div className="mb-6">
-              <Badge variant="purple" className="mb-2">Baseline & Launch</Badge>
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Which areas have you explored before?</h2>
-              <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                Optional: Select any topics you&apos;ve worked with. This calibrates your initial path difficulty without assuming unverified mastery.
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#d8ff19]/30 text-[#111111] text-xs font-black mb-2.5 border border-[#111111]/20">
+                Baseline Calibration
+              </span>
+              <h2 className="text-2xl sm:text-[26px] font-black text-[#111111] tracking-tight">
+                Which areas have you explored before?
+              </h2>
+              <p className="text-sm text-[#686860] mt-1.5 leading-relaxed font-medium">
+                Optional: Select concepts you&apos;ve touched. This personalizes your entry point so you never waste time on basics you already understand.
               </p>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-6">
               {skillOptions.map(skill => {
                 const isSelected = knownSkills.includes(skill.slug);
                 return (
@@ -267,33 +303,33 @@ export default function OnboardingPage() {
                     key={skill.slug}
                     type="button"
                     onClick={() => toggleSkill(skill.slug)}
-                    className={`py-2.5 px-3 rounded-lg border text-left text-xs font-medium transition-colors flex items-center justify-between ${
+                    className={`py-3 px-3.5 rounded-xl border text-left text-xs font-bold transition-colors flex items-center justify-between ${
                       isSelected
-                        ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-500 text-indigo-700 dark:text-indigo-300'
-                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:bg-slate-800'
+                        ? 'bg-[#d8ff19] border-[#111111] text-[#111111] shadow-xs'
+                        : 'border-[#d9d9d2] bg-white text-[#111111] hover:border-[#111111]'
                     }`}
                   >
                     <span>{skill.label}</span>
-                    {isSelected && <Check className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />}
+                    {isSelected && <Check className="w-4 h-4 text-[#111111] shrink-0 ml-2" />}
                   </button>
                 );
               })}
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-400">
-              <span className="font-semibold text-slate-800 dark:text-slate-200">How would you like to start?</span> You can begin your 10–15 min daily session immediately, or take a quick 2-minute diagnostic to place your baseline.
+            <div className="p-4 rounded-2xl bg-[#F8F8F4] border border-[#d9d9d2] text-xs text-[#686860] leading-relaxed font-medium">
+              <span className="font-bold text-[#111111]">How would you like to start?</span> You can begin your {dailyMinutes} min daily session immediately, or take a 2-minute diagnostic to map your exact strengths.
             </div>
           </div>
         )}
 
         {/* Navigation Actions */}
-        <div className="flex flex-col sm:flex-row items-center justify-between pt-6 border-t border-slate-200 dark:border-slate-800 gap-3">
+        <div className="flex flex-col sm:flex-row items-center justify-between pt-6 border-t border-[#d9d9d2] gap-3">
           {step > 1 ? (
             <Button
               variant="outline"
               size="md"
               onClick={() => setStep(step - 1)}
-              className="gap-1.5 w-full sm:w-auto"
+              className="gap-1.5 w-full sm:w-auto border-[#d9d9d2] text-[#111111] hover:bg-[#F1F1EC] font-bold"
             >
               <ArrowLeft className="w-4 h-4" />
               Back
@@ -307,7 +343,7 @@ export default function OnboardingPage() {
               size="md"
               isLoading={isSaving}
               onClick={handleNextStep}
-              className="gap-1.5 w-full sm:w-auto"
+              className="gap-1.5 w-full sm:w-auto bg-[#111111] hover:bg-black text-[#d8ff19] font-bold shadow-sm"
             >
               Continue
               <ArrowRight className="w-4 h-4" />
@@ -333,14 +369,15 @@ export default function OnboardingPage() {
                       })
                     });
                     await apiClient('/onboarding/complete', { method: 'POST' });
-                    router.push('/assessment');
+                    const goalId = selectedRole?.slug || selectedRole?.id || 'system-design';
+                    router.push(`/problem?goalId=${goalId}`);
                   } catch (err) {
                     console.error('Error completing onboarding:', err);
                   } finally {
                     setIsSaving(false);
                   }
                 }}
-                className="gap-1.5 text-xs order-2 sm:order-1"
+                className="gap-1.5 text-xs order-2 sm:order-1 border-[#d9d9d2] text-[#111111] hover:bg-[#F1F1EC] font-bold"
               >
                 Quick Diagnostic (2 min)
               </Button>
@@ -362,14 +399,15 @@ export default function OnboardingPage() {
                       })
                     });
                     await apiClient('/onboarding/complete', { method: 'POST' });
-                    router.push('/today');
+                    const goalId = selectedRole?.slug || selectedRole?.id || 'system-design';
+                    router.push(`/problem?goalId=${goalId}`);
                   } catch (err) {
                     console.error('Error completing onboarding:', err);
                   } finally {
                     setIsSaving(false);
                   }
                 }}
-                className="gap-1.5 order-1 sm:order-2"
+                className="gap-1.5 order-1 sm:order-2 bg-[#111111] hover:bg-black text-[#d8ff19] font-bold shadow-sm"
               >
                 Start Daily Learning
                 <ArrowRight className="w-4 h-4" />

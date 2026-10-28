@@ -1,99 +1,96 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { apiClient } from '@/lib/api/client';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
-import { ProgressBar } from '@/components/ui/ProgressBar';
+import { DashboardShell } from '@/components/dashboard/DashboardShell';
 import {
   ArrowRight,
-  ArrowLeft,
   CheckCircle2,
   Trophy,
-  Play,
-  Clock
+  Activity,
+  Search,
+  ShieldAlert,
+  Terminal
 } from 'lucide-react';
 
-interface Question {
-  id: string;
-  conceptId: string;
-  questionType: string;
-  questionText: string;
-  options: string[];
-  difficulty: number;
-  concept?: {
-    name: string;
-    skill?: { name: string };
-  };
-}
+function AssessmentContent() {
+  const searchParams = useSearchParams();
+  const goalParam = searchParams.get('goalId') || 'system-design';
 
-interface Assessment {
-  id: string;
-  title: string;
-  questions: Question[];
-}
-
-export default function AssessmentPage() {
-  const router = useRouter();
-  const [assessment, setAssessment] = useState<Assessment | null>(null);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [responses, setResponses] = useState<Record<string, string>>({});
+  const [selectedGoal, setSelectedGoal] = useState(goalParam);
+  const [scenario, setScenario] = useState<any | null>(null);
+  const [activeEvidenceTab, setActiveEvidenceTab] = useState<string>('');
+  const [inspectedEvidence, setInspectedEvidence] = useState<Set<string>>(new Set());
+  const [selectedActions, setSelectedActions] = useState<Set<string>>(new Set());
+  const [explanation, setExplanation] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [result, setResult] = useState<any | null>(null);
-  const [firstRecommendation, setFirstRecommendation] = useState<any | null>(null);
+  const [simulationResult, setSimulationResult] = useState<any | null>(null);
 
+  // Load diagnostic simulation for the selected goal
   useEffect(() => {
-    async function loadAssessment() {
+    async function loadScenario() {
+      setIsLoading(true);
       try {
-        const data = await apiClient('/assessments/diagnostic');
-        if (data?.assessment) {
-          setAssessment(data.assessment);
+        const res = await apiClient(`/simulations/diagnostic/${selectedGoal}`);
+        if (res?.scenario) {
+          setScenario(res.scenario);
+          if (res.scenario.availableEvidence?.length > 0) {
+            setActiveEvidenceTab(res.scenario.availableEvidence[0].id);
+            setInspectedEvidence(new Set([res.scenario.availableEvidence[0].id]));
+          }
         }
       } catch (err) {
-        console.error('Failed to load assessment:', err);
+        console.error('Failed to load simulation diagnostic:', err);
       } finally {
         setIsLoading(false);
       }
     }
-    loadAssessment();
-  }, []);
+    loadScenario();
+  }, [selectedGoal]);
 
-  const handleSelectOption = (option: string) => {
-    if (!assessment) return;
-    const currentQ = assessment.questions[currentIndex];
-    setResponses(prev => ({ ...prev, [currentQ.id]: option }));
+  const handleSelectEvidence = (evId: string) => {
+    setActiveEvidenceTab(evId);
+    setInspectedEvidence(prev => new Set([...Array.from(prev), evId]));
   };
 
-  const handleSubmit = async () => {
-    if (!assessment) return;
+  const handleToggleAction = (actionId: string, category: string) => {
+    setSelectedActions(prev => {
+      const next = new Set(prev);
+      const categoryActions = (scenario?.allowedActions || [])
+        .filter((a: any) => a.category === category)
+        .map((a: any) => a.id);
+
+      categoryActions.forEach((id: string) => next.delete(id));
+      next.add(actionId);
+      return next;
+    });
+  };
+
+  const handleSubmitSimulation = async () => {
+    if (!scenario) return;
     setIsSubmitting(true);
     try {
       const payload = {
-        responses: Object.entries(responses).map(([questionId, response]) => ({
-          questionId,
-          response
-        })),
-        durationSeconds: 120
+        selectedActionIds: Array.from(selectedActions),
+        evidenceInspected: Array.from(inspectedEvidence),
+        explanation,
+        hintsUsed: 0,
+        idempotencyKey: `diag_sub_${selectedGoal}_${Date.now()}`
       };
 
-      const res = await apiClient(`/assessments/${assessment.id}/submit`, {
+      const res = await apiClient(`/simulations/diagnostic/${selectedGoal}/submit`, {
         method: 'POST',
         body: JSON.stringify(payload)
       });
 
-      setResult(res?.result);
-
-      // Fetch the immediate First Recommendation generated by AdaptiveEngine
-      const todayRes = await apiClient('/today/recommendation').catch(() => null);
-      if (todayRes?.today?.recommendedActivity) {
-        setFirstRecommendation(todayRes.today.recommendedActivity);
+      if (res?.data) {
+        setSimulationResult(res.data);
       }
     } catch (err) {
-      console.error('Failed to submit assessment:', err);
+      console.error('Failed to submit simulation diagnostic:', err);
     } finally {
       setIsSubmitting(false);
     }
@@ -101,206 +98,342 @@ export default function AssessmentPage() {
 
   if (isLoading) {
     return (
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="text-center text-slate-500 dark:text-slate-400">
-          <div className="animate-spin w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full mx-auto mb-3" />
-          Calibrating diagnostic assessment...
+      <DashboardShell title="Diagnostic Assessment">
+        <div className="flex-1 flex items-center justify-center min-h-[60vh] p-8">
+          <div className="text-center text-[#686860]">
+            <div className="animate-spin w-8 h-8 border-2 border-[#111111] border-t-transparent rounded-full mx-auto mb-3" />
+            Initializing diagnostic simulation environment...
+          </div>
         </div>
-      </div>
+      </DashboardShell>
     );
   }
 
-  // STEP 5: DIAGNOSTIC RESULT & FIRST RECOMMENDATION
-  if (result) {
-    const targetSlug = firstRecommendation?.lessonSlug;
+  // SIMULATION RESULT VIEW
+  if (simulationResult) {
+    const { dimensionScores, isCriticalFailure, criticalFailureReasons, rationale } = simulationResult;
 
     return (
-      <div className="flex-1 flex flex-col items-center justify-center px-4 py-12 max-w-2xl mx-auto w-full">
-        <Card className="w-full p-8 text-center bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xl">
-          <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center mx-auto text-indigo-600 dark:text-indigo-400 mb-4">
-            <Trophy className="w-8 h-8" />
-          </div>
-
-          <Badge variant="purple" className="mb-2">Diagnostic Complete</Badge>
-          <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white">Diagnostic Results</h1>
-          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 max-w-md mx-auto">
-            We have calibrated your baseline knowledge state and mapped your learning path.
-          </p>
-
-          <div className="my-6 p-5 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-around">
-            <div>
-              <div className="text-3xl font-extrabold text-indigo-600 dark:text-indigo-400">{result.score}%</div>
-              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">Diagnostic Score</div>
+      <DashboardShell title="Diagnostic Results">
+        <div className="flex-1 flex flex-col items-center justify-center px-4 py-8 max-w-3xl mx-auto w-full">
+          <div className="w-full p-8 text-center bg-white dark:bg-[#131126] border border-[#d9d9d2] dark:border-white/5 rounded-[24px] shadow-sm">
+            <div className="w-16 h-16 rounded-2xl bg-[#d8ff19]/25 border border-[#d8ff19]/50 flex items-center justify-center mx-auto text-[#111111] mb-4">
+              <Trophy className="w-8 h-8 text-[#111111]" />
             </div>
-            <div className="h-10 w-px bg-slate-200 dark:bg-slate-800" />
-            <div>
-              <div className="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400">
-                {result.correctAnswers} / {result.totalQuestions}
-              </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">Questions Correct</div>
-            </div>
-          </div>
 
-          {/* FIRST RECOMMENDATION HERO */}
-          {firstRecommendation && (
-            <div className="mb-6 p-6 rounded-2xl bg-gradient-to-br from-indigo-50 via-white to-slate-50 dark:from-indigo-950/50 dark:via-slate-900 dark:to-slate-900 border border-indigo-200 dark:border-indigo-500/30 text-left">
-              <div className="flex items-center gap-2 mb-2">
-                <Badge variant="purple" size="sm">Your First Daily Recommendation</Badge>
-                <span className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
-                  <Clock className="w-3 h-3" />
-                  {firstRecommendation.estimatedMinutes}m session
-                </span>
-              </div>
-              <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">
-                {firstRecommendation.title}
-              </h3>
-              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
-                <span className="font-semibold text-indigo-600 dark:text-indigo-400">Why start here: </span>
-                {firstRecommendation.reason}
-              </p>
+            <span className={`px-3 py-1 rounded-full text-xs font-semibold mb-3 inline-block ${
+              isCriticalFailure 
+                ? 'bg-red-50 dark:bg-red-950/50 border border-red-300 dark:border-red-500/30 text-red-700 dark:text-red-400' 
+                : 'bg-[#d8ff19]/25 border border-[#d8ff19]/50 text-[#111111] font-bold'
+            }`}>
+              {isCriticalFailure ? 'Critical Constraint Triggered' : 'Diagnostic Simulation Verified'}
+            </span>
 
-              {targetSlug ? (
-                <Link href={`/lessons/${targetSlug}`}>
-                  <Button size="lg" className="w-full gap-2 text-base font-semibold shadow-lg shadow-indigo-600/20">
-                    <Play className="w-4 h-4 fill-white" />
-                    Start Today&apos;s Learning
-                  </Button>
-                </Link>
-              ) : (
-                <Link href="/today">
-                  <Button size="lg" className="w-full gap-2 text-base font-semibold shadow-lg shadow-indigo-600/20">
-                    <ArrowRight className="w-4 h-4" />
-                    View Today&apos;s Learning
-                  </Button>
-                </Link>
-              )}
-            </div>
-          )}
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-[#111111] dark:text-white tracking-tight">
+              Baseline Assessment Verified
+            </h1>
+            <p className="text-xs sm:text-sm text-[#686860] dark:text-[#C5BDD7] mt-1.5 max-w-lg mx-auto">
+              Your decisions were evaluated across 4 empirical dimensions. We mapped your personalized entry point into the versioned Master Path.
+            </p>
 
-          {!firstRecommendation && (
-            <Button
-              size="lg"
-              onClick={() => router.push('/today')}
-              className="w-full gap-2 text-base"
-            >
-              Start Today&apos;s Learning
-              <ArrowRight className="w-4 h-4" />
-            </Button>
-          )}
-        </Card>
-      </div>
-    );
-  }
-
-  if (!assessment || assessment.questions.length === 0) {
-    return (
-      <div className="flex-1 flex items-center justify-center p-8">
-        <Card className="text-center p-8 max-w-md">
-          <p className="text-slate-500 dark:text-slate-400 mb-4">No diagnostic questions found.</p>
-          <Button onClick={() => router.push('/today')}>Go to Today</Button>
-        </Card>
-      </div>
-    );
-  }
-
-  const currentQ = assessment.questions[currentIndex];
-  const totalQuestions = assessment.questions.length;
-  const progressPercent = Math.round(((currentIndex + 1) / totalQuestions) * 100);
-  const selectedOption = responses[currentQ.id];
-
-  return (
-    <div className="flex-1 flex flex-col items-center justify-center px-4 py-12 max-w-2xl mx-auto w-full">
-      {/* Assessment Header */}
-      <div className="w-full mb-6">
-        <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
-          <span>Question {currentIndex + 1} of {totalQuestions} • {currentQ.concept?.skill?.name || 'Software Engineering'}</span>
-          <button
-            type="button"
-            onClick={() => router.push('/today')}
-            className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
-          >
-            Skip for now &rarr;
-          </button>
-        </div>
-        <ProgressBar value={progressPercent} color="indigo" size="sm" />
-      </div>
-
-      <Card className="w-full p-6 sm:p-8">
-        <div className="mb-6">
-          <Badge variant="info" className="mb-2">
-            {currentQ.concept?.name || 'Diagnostic Check'}
-          </Badge>
-          <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white leading-relaxed">
-            {currentQ.questionText}
-          </h2>
-        </div>
-
-        {/* Options */}
-        <div className="space-y-3 mb-8">
-          {currentQ.options?.map((option, idx) => {
-            const isSelected = selectedOption === option;
-            return (
-              <div
-                key={idx}
-                onClick={() => handleSelectOption(option)}
-                className={`p-4 rounded-xl border cursor-pointer transition-all flex items-center justify-between text-xs sm:text-sm ${
-                  isSelected
-                    ? 'border-indigo-500 bg-indigo-50/90 dark:bg-indigo-950/40 text-indigo-950 dark:text-white font-medium shadow-sm'
-                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/60 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-700'
-                }`}
-              >
-                <span>{option}</span>
-                <div
-                  className={`w-5 h-5 rounded-full border flex items-center justify-center text-xs shrink-0 ml-3 ${
-                    isSelected
-                      ? 'border-indigo-500 bg-indigo-600 text-white'
-                      : 'border-slate-300 dark:border-slate-700'
-                  }`}
-                >
-                  {isSelected && '✓'}
+            {/* CRITICAL FAILURE ALERT */}
+            {isCriticalFailure && (
+              <div className="my-5 p-4 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-500/30 text-left flex items-start space-x-3">
+                <ShieldAlert className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
+                <div>
+                  <h4 className="text-xs font-semibold text-red-800 dark:text-red-300">Critical Failure Overrides High Score</h4>
+                  <p className="text-[11px] text-red-700 dark:text-red-400/90 mt-0.5 leading-relaxed">
+                    {criticalFailureReasons?.join('; ') || 'An architectural choice violated a fundamental safety constraint. Score is capped at 45%.'}
+                  </p>
                 </div>
               </div>
-            );
-          })}
+            )}
+
+            {/* 4-DIMENSIONAL MASTERY BREAKDOWN */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-6">
+              <div className="p-4 bg-[#F1F1EC] dark:bg-[#161525] rounded-[18px] border border-[#d9d9d2] dark:border-white/5 text-center">
+                <div className="text-[10px] font-semibold text-[#686860] dark:text-[#948BA5] uppercase tracking-wider">Diagnosis</div>
+                <div className="text-2xl font-bold text-[#111111] dark:text-white mt-1">{dimensionScores?.diagnosis || 0}%</div>
+                <div className="text-[10px] text-[#686860] dark:text-[#948BA5] mt-0.5">Weight: 30%</div>
+              </div>
+              <div className="p-4 bg-[#F1F1EC] dark:bg-[#161525] rounded-[18px] border border-[#d9d9d2] dark:border-white/5 text-center">
+                <div className="text-[10px] font-semibold text-[#686860] dark:text-[#948BA5] uppercase tracking-wider">Investigation</div>
+                <div className="text-2xl font-bold text-[#111111] dark:text-white mt-1">{dimensionScores?.investigation || 0}%</div>
+                <div className="text-[10px] text-[#686860] dark:text-[#948BA5] mt-0.5">Weight: 25%</div>
+              </div>
+              <div className="p-4 bg-[#F1F1EC] dark:bg-[#161525] rounded-[18px] border border-[#d9d9d2] dark:border-white/5 text-center">
+                <div className="text-[10px] font-semibold text-[#686860] dark:text-[#948BA5] uppercase tracking-wider">Implementation</div>
+                <div className="text-2xl font-bold text-[#111111] dark:text-white mt-1">{dimensionScores?.implementation || 0}%</div>
+                <div className="text-[10px] text-[#686860] dark:text-[#948BA5] mt-0.5">Weight: 25%</div>
+              </div>
+              <div className="p-4 bg-[#F1F1EC] dark:bg-[#161525] rounded-[18px] border border-[#d9d9d2] dark:border-white/5 text-center">
+                <div className="text-[10px] font-semibold text-[#686860] dark:text-[#948BA5] uppercase tracking-wider">Verification</div>
+                <div className="text-2xl font-bold text-[#111111] dark:text-white mt-1">{dimensionScores?.verification || 0}%</div>
+                <div className="text-[10px] text-[#686860] dark:text-[#948BA5] mt-0.5">Weight: 20%</div>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-[#F8F8F4] dark:bg-[#161525] border border-[#d9d9d2] dark:border-white/5 text-left mb-6">
+              <div className="text-[10px] font-bold text-[#111111] uppercase tracking-wider mb-1">Evaluator Feedback</div>
+              <p className="text-xs text-[#686860] dark:text-[#C5BDD7] leading-relaxed">{rationale}</p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+              <Link href={`/problem?goalId=${selectedGoal}`} className="w-full sm:w-auto">
+                <button className="w-full sm:w-auto px-6 py-3 rounded-xl text-xs font-bold bg-[#111111] hover:bg-black text-[#d8ff19] shadow-sm flex items-center justify-center gap-2">
+                  <span>Launch Problem-First Learning Workspace</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </Link>
+              <Link href="/my-learning" className="w-full sm:w-auto">
+                <button className="w-full sm:w-auto px-5 py-3 rounded-xl text-xs font-semibold bg-[#F1F1EC] dark:bg-[#161525] border border-[#d9d9d2] dark:border-white/10 hover:border-[#111111] text-[#111111] dark:text-[#C5BDD7] hover:text-black transition-all">
+                  View My Master Path
+                </button>
+              </Link>
+            </div>
+          </div>
+        </div>
+      </DashboardShell>
+    );
+  }
+
+  // ACTIVE INTERACTIVE DIAGNOSTIC SIMULATION WORKSPACE
+  const currentEvidence = (scenario?.availableEvidence || []).find((e: any) => e.id === activeEvidenceTab);
+
+  return (
+    <DashboardShell title="Diagnostic Simulation">
+      <div className="flex-1 flex flex-col gap-4 max-w-7xl mx-auto w-full pb-8">
+        {/* Top Header & Goal Selector */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-[#131126] border border-[#d9d9d2] dark:border-white/5 rounded-[22px] p-4 sm:p-5 shadow-sm">
+          <div>
+            <span className="px-2.5 py-1 rounded-full bg-[#d8ff19]/20 border border-[#d8ff19]/50 text-[11px] font-bold text-[#111111] dark:text-white flex items-center w-fit mb-2">
+              <Activity className="w-3.5 h-3.5 mr-1 text-[#15803d]" />
+              Interactive Diagnostic Simulation
+            </span>
+            <h1 className="text-xl sm:text-2xl font-bold text-[#111111] dark:text-white tracking-tight">
+              {scenario?.title || 'Diagnostic Scenario'}
+            </h1>
+            <p className="text-xs sm:text-sm text-[#686860] dark:text-[#C5BDD7] mt-1 max-w-2xl leading-relaxed">
+              {scenario?.description}
+            </p>
+          </div>
+
+          {/* Goal Selector Switch */}
+          <div className="flex items-center space-x-1.5 bg-[#F1F1EC] dark:bg-[#161525] p-1.5 rounded-xl border border-[#d9d9d2] dark:border-white/5">
+            {[
+              { id: 'system-design', label: 'System Design' },
+              { id: 'backend-development', label: 'Backend' },
+              { id: 'full-stack-development', label: 'Full Stack' }
+            ].map(g => (
+              <button
+                key={g.id}
+                onClick={() => setSelectedGoal(g.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  selectedGoal === g.id
+                    ? 'bg-[#111111] text-[#d8ff19] shadow-sm font-bold'
+                    : 'text-[#686860] dark:text-[#948BA5] hover:text-[#111111] dark:hover:text-white'
+                }`}
+              >
+                {g.label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Navigation Actions */}
-        <div className="flex items-center justify-between pt-6 border-t border-slate-200 dark:border-slate-800">
-          <Button
-            variant="outline"
-            size="md"
-            disabled={currentIndex === 0}
-            onClick={() => setCurrentIndex(currentIndex - 1)}
-            className="gap-1.5"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Previous
-          </Button>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          {/* Left Column: Interactive Evidence Inspection Panel (7 cols) */}
+          <div className="lg:col-span-7 flex flex-col gap-4">
+            <div className="bg-white dark:bg-[#131126] border border-[#d9d9d2] dark:border-white/5 rounded-[22px] p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-3 pb-2.5 border-b border-[#d9d9d2] dark:border-white/5">
+                <div className="flex items-center space-x-2">
+                  <Search className="w-4 h-4 text-[#111111]" />
+                  <h3 className="text-xs font-bold text-[#111111] uppercase tracking-wider">
+                    Available Evidence ({inspectedEvidence.size}/{(scenario?.availableEvidence || []).length} inspected)
+                  </h3>
+                </div>
+                <span className="text-[11px] text-[#686860]">Inspect telemetry before deciding</span>
+              </div>
 
-          {currentIndex < totalQuestions - 1 ? (
-            <Button
-              size="md"
-              disabled={!selectedOption}
-              onClick={() => setCurrentIndex(currentIndex + 1)}
-              className="gap-1.5"
-            >
-              Next Question
-              <ArrowRight className="w-4 h-4" />
-            </Button>
-          ) : (
-            <Button
-              size="md"
-              disabled={!selectedOption}
-              isLoading={isSubmitting}
-              onClick={handleSubmit}
-              className="gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-600/20"
-            >
-              Complete Diagnostic
-              <CheckCircle2 className="w-4 h-4" />
-            </Button>
-          )}
+              {/* Evidence Tabs */}
+              <div className="flex flex-wrap gap-2 mb-3.5">
+                {(scenario?.availableEvidence || []).map((ev: any) => {
+                  const isSelected = activeEvidenceTab === ev.id;
+                  const isInspected = inspectedEvidence.has(ev.id);
+                  return (
+                    <button
+                      key={ev.id}
+                      onClick={() => handleSelectEvidence(ev.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center space-x-2 border transition-all ${
+                        isSelected
+                          ? 'border-[#111111] bg-[#d8ff19] text-[#111111] shadow-sm font-bold'
+                          : isInspected
+                          ? 'border-[#d9d9d2] bg-[#F1F1EC] text-[#111111] hover:border-[#111111]'
+                          : 'border-[#d9d9d2] bg-white text-[#686860] hover:text-[#111111]'
+                      }`}
+                    >
+                      <span>{ev.title}</span>
+                      {isInspected && <CheckCircle2 className="w-3.5 h-3.5 text-[#21865B]" />}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Evidence Content Viewer */}
+              {currentEvidence && (
+                <div className="rounded-xl border border-[#3d3d36] bg-[#0A0915] p-4 font-mono text-xs text-slate-200 overflow-x-auto min-h-[220px]">
+                  <div className="flex items-center justify-between pb-2 mb-3 border-b border-white/10 text-[11px] text-[#948BA5]">
+                    <span className="flex items-center space-x-1.5">
+                      <Terminal className="w-3.5 h-3.5 text-blue-400" />
+                      <span>{currentEvidence.type} TELEMETRY TRACE</span>
+                    </span>
+                    <span>REF: {currentEvidence.id}</span>
+                  </div>
+                  <pre className="whitespace-pre-wrap leading-relaxed text-slate-300">
+                    {typeof currentEvidence.data === 'string'
+                      ? currentEvidence.data
+                      : JSON.stringify(currentEvidence.data, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+
+            {/* Explanation Textarea */}
+            <div className="bg-white dark:bg-[#131126] border border-[#d9d9d2] dark:border-white/5 rounded-[22px] p-5 shadow-sm">
+              <h4 className="text-[11px] font-bold text-[#111111] dark:text-white uppercase tracking-wider mb-1">
+                Engineering Rationale (Optional)
+              </h4>
+              <p className="text-xs text-[#686860] dark:text-[#948BA5] mb-2.5">
+                Briefly explain why your selected actions address the root cause and avoid safety risks.
+              </p>
+              <textarea
+                rows={3}
+                value={explanation}
+                onChange={e => setExplanation(e.target.value)}
+                placeholder="e.g. Sequential scan on user_devices saturates connection pool. Adding compound index covers active device lookups..."
+                className="w-full p-3 text-xs rounded-xl border border-[#d9d9d2] bg-[#F8F8F4] text-[#111111] focus:outline-none focus:ring-1 focus:ring-[#111111]"
+              />
+            </div>
+          </div>
+
+          {/* Right Column: Decision Controls (5 cols) */}
+          <div className="lg:col-span-5 flex flex-col gap-4">
+            <div className="bg-white dark:bg-[#131126] border border-[#d9d9d2] dark:border-white/5 rounded-[22px] p-5 shadow-sm">
+              <h3 className="text-xs font-bold text-[#111111] dark:text-white uppercase tracking-wider mb-4 pb-2.5 border-b border-[#d9d9d2] dark:border-white/5">
+                Select Engineering Decisions
+              </h3>
+
+              {/* Category: DIAGNOSIS */}
+              <div className="mb-4">
+                <label className="block text-[11px] font-bold text-[#111111] dark:text-[#d8ff19] uppercase tracking-wider mb-2">
+                  1. Identify Root Cause (Diagnosis 30%)
+                </label>
+                <div className="space-y-2">
+                  {(scenario?.allowedActions || [])
+                    .filter((a: any) => a.category === 'DIAGNOSIS')
+                    .map((action: any) => {
+                      const isSelected = selectedActions.has(action.id);
+                      return (
+                        <div
+                          key={action.id}
+                          onClick={() => handleToggleAction(action.id, 'DIAGNOSIS')}
+                          className={`p-3 rounded-xl border text-xs cursor-pointer transition-all ${
+                            isSelected
+                              ? 'border-[#111111] bg-[#d8ff19]/20 text-[#111111] font-bold shadow-xs ring-1.5 ring-[#111111]'
+                              : 'border-[#d9d9d2] dark:border-white/10 hover:border-[#111111] bg-[#F8F8F4] dark:bg-[#161525] text-[#111111] dark:text-[#C5BDD7]'
+                          }`}
+                        >
+                          {action.label}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {/* Category: IMPLEMENTATION */}
+              <div className="mb-4">
+                <label className="block text-[11px] font-bold text-[#111111] dark:text-white uppercase tracking-wider mb-2">
+                  2. Implement Fix (Implementation 25%)
+                </label>
+                <div className="space-y-2">
+                  {(scenario?.allowedActions || [])
+                    .filter((a: any) => a.category === 'IMPLEMENTATION')
+                    .map((action: any) => {
+                      const isSelected = selectedActions.has(action.id);
+                      return (
+                        <div
+                          key={action.id}
+                          onClick={() => handleToggleAction(action.id, 'IMPLEMENTATION')}
+                          className={`p-3 rounded-xl border text-xs cursor-pointer transition-all ${
+                            isSelected
+                              ? 'border-[#111111] bg-[#d8ff19]/20 text-[#111111] font-bold shadow-xs ring-1.5 ring-[#111111]'
+                              : 'border-[#d9d9d2] dark:border-white/10 hover:border-[#111111] bg-[#F8F8F4] dark:bg-[#161525] text-[#111111] dark:text-[#C5BDD7]'
+                          }`}
+                        >
+                          {action.label}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {/* Category: VERIFICATION */}
+              <div className="mb-5">
+                <label className="block text-[11px] font-bold text-[#15803d] dark:text-[#d8ff19] uppercase tracking-wider mb-2">
+                  3. Verify Fix (Verification 20%)
+                </label>
+                <div className="space-y-2">
+                  {(scenario?.allowedActions || [])
+                    .filter((a: any) => a.category === 'VERIFICATION')
+                    .map((action: any) => {
+                      const isSelected = selectedActions.has(action.id);
+                      return (
+                        <div
+                          key={action.id}
+                          onClick={() => handleToggleAction(action.id, 'VERIFICATION')}
+                          className={`p-3 rounded-xl border text-xs cursor-pointer transition-all ${
+                            isSelected
+                              ? 'border-[#111111] bg-[#d8ff19]/20 text-[#111111] font-bold shadow-xs ring-1.5 ring-[#111111]'
+                              : 'border-[#d9d9d2] dark:border-white/10 hover:border-[#111111] bg-[#F8F8F4] dark:bg-[#161525] text-[#111111] dark:text-[#C5BDD7]'
+                          }`}
+                        >
+                          {action.label}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+
+              <button
+                onClick={handleSubmitSimulation}
+                disabled={isSubmitting || selectedActions.size === 0}
+                className="w-full py-3.5 px-4 rounded-xl text-xs font-bold bg-[#111111] hover:bg-black text-[#d8ff19] shadow-sm hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+              >
+                <span>{isSubmitting ? 'Evaluating Empirical Evidence...' : 'Submit & Verify Architecture'}</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         </div>
-      </Card>
-    </div>
+      </div>
+    </DashboardShell>
+  );
+}
+
+export default function AssessmentPage() {
+  return (
+    <Suspense
+      fallback={
+        <DashboardShell title="Diagnostic Simulation">
+          <div className="flex-1 flex items-center justify-center min-h-[60vh] p-8">
+            <div className="text-center text-[#686860]">
+              <div className="animate-spin w-8 h-8 border-2 border-[#111111] border-t-transparent rounded-full mx-auto mb-3" />
+              Loading assessment environment...
+            </div>
+          </div>
+        </DashboardShell>
+      }
+    >
+      <AssessmentContent />
+    </Suspense>
   );
 }
