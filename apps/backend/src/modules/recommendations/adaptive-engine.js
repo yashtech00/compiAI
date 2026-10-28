@@ -242,6 +242,15 @@ export class AdaptiveEngine {
           reason,
           dailyMinutes
         };
+      } else {
+        logger.info(`Milestone ${inProgressConcept.name} has no published lesson. Pending Phase 2 session generation.`);
+        return {
+          actionType: 'CONTENT_UNAVAILABLE',
+          concept: inProgressConcept,
+          lesson: null,
+          reason: `Curriculum content for ${inProgressConcept.name} is ready for session generation.`,
+          dailyMinutes
+        };
       }
     }
 
@@ -256,11 +265,15 @@ export class AdaptiveEngine {
       targetSkillIds = defaultSkills.map(s => s.id);
     }
 
-    // Load candidate concepts with prerequisites
+    // Load candidate concepts with prerequisites (scoped to shared reference concepts or user's custom concepts)
     const candidateConcepts = await prisma.concept.findMany({
       where: {
         skillId: { in: targetSkillIds },
-        status: 'ACTIVE'
+        status: 'ACTIVE',
+        OR: [
+          { isCustom: false },
+          { userId }
+        ]
       },
       include: {
         skill: true,

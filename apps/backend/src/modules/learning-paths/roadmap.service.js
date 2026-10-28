@@ -1,18 +1,44 @@
 import prisma from '../../config/prisma.js';
 import { AiService } from '../ai/ai.service.js';
 import { logger } from '../../utils/logger.js';
+import { PathSynthesisService } from './path-synthesis.service.js';
 
 export class RoadmapService {
   /**
-   * Generates or regenerates an explainable personalized roadmap for a user
-   * Integrates Gemini AI pedagogical sequencing with deterministic fallback & DAG validation
+   * Generates or regenerates an individualized, explainable personalized roadmap for a user
+   * Integrates Gemini AI personalized path synthesis with DAG cycle validation & goal-adaptive fallback
    */
-  static async generateRoadmap(userId) {
-    // 1. Fetch user's profile, active goal, and target role
+  static async generateRoadmap(userId, options = {}) {
+    // 0. Idempotency check: If user already has an active roadmap and force regeneration was not requested, return it
+    if (!options.force) {
+      const existingPath = await prisma.learningPath.findFirst({
+        where: { userId, status: 'ACTIVE' },
+        include: {
+          items: {
+            include: {
+              concept: {
+                include: {
+                  skill: true,
+                  lessons: { where: { status: 'PUBLISHED' }, take: 1 }
+                }
+              }
+            },
+            orderBy: { sequenceOrder: 'asc' }
+          }
+        }
+      });
+      if (existingPath && existingPath.items?.length > 0) {
+        return existingPath;
+      }
+    }
+
+    // 1. Fetch user's profile, active goal, userSkills, and userConcepts
     const user = await prisma.user.findUnique({
       where: { id: userId },
       include: {
         profile: true,
+        userSkills: { include: { skill: true } },
+        userConcepts: true,
         learningGoals: {
           where: { status: 'ACTIVE' },
           include: {
@@ -31,165 +57,146 @@ export class RoadmapService {
     });
 
     const activeGoal = user?.learningGoals?.[0] || null;
-    let targetSkillIds = [];
+    const goalTitle = activeGoal?.title || 'Software Engineering Competency';
+    const targetRole = activeGoal?.targetRole?.name || 'Software Engineer';
+    const experienceLevel = user?.profile?.experienceLevel || 'BEGINNER';
+    const dailyMinutes = user?.profile?.dailyMinutes || 15;
+    const knownSkillSlugs = user?.userSkills?.map(us => us.skill.slug) || [];
 
-    if (activeGoal?.targetRole?.roleSkills?.length > 0) {
-      targetSkillIds = activeGoal.targetRole.roleSkills.map(rs => rs.skillId);
-    } else {
-      // Default to core foundational skills
-      const defaultSkills = await prisma.skill.findMany({
-        where: {
-          slug: { in: ['javascript', 'nodejs', 'rest-apis', 'postgresql', 'redis', 'system-design'] }
-        }
-      });
-      targetSkillIds = defaultSkills.map(s => s.id);
-    }
-
-    // 2. Load all concepts for these target skills with their prerequisites and published lessons
-    const candidateConcepts = await prisma.concept.findMany({
-      where: {
-        skillId: { in: targetSkillIds },
-        status: 'ACTIVE'
-      },
-      include: {
-        skill: true,
-        prerequisites: {
-          include: { prerequisiteConcept: true }
-        },
-        lessons: {
-          where: { status: 'PUBLISHED' },
-          take: 1
-        }
-      },
-      orderBy: [
-        { skill: { difficulty: 'asc' } },
-        { orderIndex: 'asc' }
-      ]
-    });
-
-    if (candidateConcepts.length === 0) {
-      throw new Error('No candidate concepts found for target skills');
-    }
-
-    // 3. Load user's current mastery for these concepts
-    const userConcepts = await prisma.userConcept.findMany({
-      where: { userId }
-    });
     const masteryMap = new Map();
-    for (const uc of userConcepts) {
+    for (const uc of (user?.userConcepts || [])) {
       masteryMap.set(uc.conceptId, uc.masteryScore);
     }
 
-    // Fetch known skills from userSkills or onboarding choices
-    const userSkills = await prisma.userSkill.findMany({
-      where: { userId },
-      include: { skill: true }
+    // 2. Synthesize personalized learning path using AI / goal-adaptive synthesizer
+    const synthesized = await PathSynthesisService.synthesizePersonalizedPath({
+      goalTitle,
+      targetRole,
+      experienceLevel,
+      dailyMinutes,
+      knownSkills: knownSkillSlugs,
+      existingMastery: Object.fromEntries(masteryMap)
     });
-    const knownSkillSlugs = userSkills.map(us => us.skill.slug);
 
-    // 4. Compute valid deterministic topological sort as baseline candidate path
-    const deterministicOrderedIds = this._topologicalSort(
-      candidateConcepts,
-      masteryMap,
-      user?.profile?.experienceLevel || 'BEGINNER',
-      knownSkillSlugs
-    );
+    // 3. Resolve or create concepts for all milestones
+    const milestoneConcepts = [];
+    for (const milestone of synthesized.milestones) {
+      const customSlug = `custom-${userId.slice(0, 8)}-${milestone.topicSlug}`;
+      let concept = await prisma.concept.findFirst({
+        where: {
+          OR: [
+            { slug: milestone.topicSlug },
+            { slug: customSlug }
+          ]
+        },
+        include: {
+          skill: true,
+          prerequisites: { include: { prerequisiteConcept: true } },
+          lessons: { where: { status: 'PUBLISHED' }, take: 1 }
+        }
+      });
 
-    // 5. Query Gemini for pedagogical ordering and learning approach
-    let finalOrderedIds = deterministicOrderedIds;
-    let aiProposal = null;
-    let analysisType = 'INITIAL';
-    let triggerReason = 'ONBOARDING_INITIAL_PATH';
-    let evidenceSummary = { source: 'deterministic_topological_sort' };
-    let confidence = 1.0;
-
-    if (AiService.isRealProviderConfigured()) {
-      try {
-        const targetOutcome = activeGoal?.targetRole?.name
-          ? `Become job-ready as a ${activeGoal.targetRole.name}`
-          : 'Software Engineering Competency';
-
-        aiProposal = await AiService.generateInitialPath({
-          learnerProfile: {
-            experienceLevel: user?.profile?.experienceLevel || 'BEGINNER',
-            dailyMinutes: user?.profile?.dailyMinutes || 15,
-            knownSkills: knownSkillSlugs
-          },
-          candidateConcepts,
-          targetOutcome
+      if (!concept) {
+        // Try finding matching skill
+        const matchedSkill = await prisma.skill.findFirst({
+          where: {
+            OR: [
+              { slug: milestone.domainSkillSlug },
+              { slug: 'fundamentals' },
+              { category: 'BACKEND' }
+            ]
+          }
         });
 
-        if (aiProposal && Array.isArray(aiProposal.orderedConceptIds) && aiProposal.orderedConceptIds.length > 0) {
-          const isValid = this._validateConceptSequence(aiProposal.orderedConceptIds, candidateConcepts, masteryMap);
-          if (isValid) {
-            finalOrderedIds = aiProposal.orderedConceptIds;
-            evidenceSummary = {
-              source: 'gemini_pedagogical_planner',
-              learningApproach: aiProposal.learningApproach,
-              recommendedPacing: aiProposal.recommendedPacing,
-              pedagogicalNotes: aiProposal.pedagogicalNotes
-            };
-            confidence = Number(aiProposal.confidence) || 0.85;
-          } else {
-            logger.warn('Gemini initial path failed DAG/concept validation; falling back safely to deterministic sort.');
-            evidenceSummary = {
-              source: 'deterministic_fallback_after_invalid_ai_proposal',
-              originalConfidence: aiProposal.confidence
-            };
+        concept = await prisma.concept.create({
+          data: {
+            userId,
+            isCustom: true,
+            skillId: matchedSkill?.id || null,
+            name: milestone.title,
+            slug: customSlug,
+            description: milestone.measurableObjective,
+            difficulty: milestone.difficulty,
+            status: 'ACTIVE'
+          },
+          include: {
+            skill: true,
+            prerequisites: { include: { prerequisiteConcept: true } },
+            lessons: { where: { status: 'PUBLISHED' }, take: 1 }
+          }
+        });
+      }
+
+      milestoneConcepts.push({ milestone, concept });
+    }
+
+    // 4. Link concept prerequisites if specified
+    for (const { milestone, concept } of milestoneConcepts) {
+      if (milestone.prerequisiteTopicSlugs?.length > 0) {
+        for (const prereqSlug of milestone.prerequisiteTopicSlugs) {
+          const prereqItem = milestoneConcepts.find(mc => mc.milestone.topicSlug === prereqSlug);
+          if (prereqItem && prereqItem.concept.id !== concept.id) {
+            await prisma.conceptPrerequisite.upsert({
+              where: {
+                conceptId_prerequisiteConceptId: {
+                  conceptId: concept.id,
+                  prerequisiteConceptId: prereqItem.concept.id
+                }
+              },
+              update: {},
+              create: {
+                conceptId: concept.id,
+                prerequisiteConceptId: prereqItem.concept.id,
+                strength: 1
+              }
+            }).catch(() => null);
           }
         }
-      } catch (err) {
-        logger.warn(`Gemini path generation error: ${err.message}. Using deterministic sort.`);
       }
     }
 
-    // Build map for quick concept lookup
-    const conceptById = new Map();
-    for (const c of candidateConcepts) {
-      conceptById.set(c.id, c);
-    }
-
-    // 6. Build explainable items with reasons
-    const roadmapItemsData = finalOrderedIds.map((conceptId, index) => {
-      const concept = conceptById.get(conceptId);
-      if (!concept) return null;
-
-      const mastery = masteryMap.get(conceptId) || 0;
+    // 5. Build explainable roadmap items
+    const roadmapItemsData = milestoneConcepts.map(({ milestone, concept }, index) => {
+      const mastery = masteryMap.get(concept.id) || 0;
       let status = 'PENDING';
-      let reason = `Required for ${concept.skill.name}`;
+      let reason = milestone.whyThisMatters || `Required for ${milestone.title}`;
 
       if (mastery >= 70) {
         status = 'COMPLETED';
         reason = `Mastered (${mastery}% score). Available for periodic recall.`;
-      } else if (index === 0 || (index > 0 && finalOrderedIds.slice(0, index).every(prevId => (masteryMap.get(prevId) || 0) >= 60))) {
+      } else if (index === 0 || (index > 0 && milestoneConcepts.slice(0, index).every(prev => (masteryMap.get(prev.concept.id) || 0) >= 60))) {
         status = 'IN_PROGRESS';
-        reason = `Next recommended milestone in your ${concept.skill.name} journey.`;
+        reason = `Next recommended milestone in your ${milestone.title} journey. ${milestone.measurableObjective}`;
       } else {
         status = 'PENDING';
-        if (concept.prerequisites.length > 0) {
-          const prereqNames = concept.prerequisites.map(p => p.prerequisiteConcept.name).join(', ');
-          reason = `Builds upon: ${prereqNames}.`;
+        if (milestone.prerequisiteTopicSlugs?.length > 0) {
+          reason = `Builds upon: ${milestone.prerequisiteTopicSlugs.join(', ')}.`;
         } else {
-          reason = `Foundational concept for ${activeGoal?.targetRole?.name || 'Software Engineering'}.`;
+          reason = `Foundational milestone for ${goalTitle}.`;
         }
       }
 
-      // Check if Gemini had a pedagogical note for this concept
-      const note = aiProposal?.pedagogicalNotes?.find(n => n.conceptId === conceptId);
-      if (note && status !== 'COMPLETED') {
-        reason = `${reason} (Pedagogy: ${note.reason})`;
-      }
-
       return {
-        conceptId,
+        conceptId: concept.id,
+        milestoneId: milestone.topicSlug,
+        title: milestone.title,
+        targetOutcome: milestone.measurableObjective,
+        estimatedMinutes: (milestone.estimatedSessions || 1) * dailyMinutes,
+        metadata: {
+          domainSkillSlug: milestone.domainSkillSlug,
+          difficulty: milestone.difficulty,
+          estimatedSessions: milestone.estimatedSessions,
+          prerequisiteTopicSlugs: milestone.prerequisiteTopicSlugs,
+          whyThisMatters: milestone.whyThisMatters
+        },
         sequenceOrder: index + 1,
         status,
         reason,
         completedAt: mastery >= 70 ? new Date() : null
       };
-    }).filter(Boolean);
+    });
 
-    // 7. Persist LearningPath in PostgreSQL transaction with versioning
+    // 6. Persist LearningPath in PostgreSQL transaction with versioning
     const roadmap = await prisma.$transaction(async (tx) => {
       // Find latest path to determine next version
       const latestPath = await tx.learningPath.findFirst({
@@ -214,14 +221,21 @@ export class RoadmapService {
         data: {
           userId,
           learningGoalId: activeGoal?.id || null,
-          title: activeGoal ? `${activeGoal.title} Roadmap` : 'Software Engineering Roadmap',
+          title: synthesized.pathTitle || `${goalTitle} Path`,
+          targetGoal: goalTitle,
+          pedagogicalApproach: synthesized.pedagogicalApproach,
           status: 'ACTIVE',
           version: nextVersion,
           previousPathId: latestPath?.id || null,
-          analysisType,
-          triggerReason,
-          evidenceSummary,
-          confidence,
+          analysisType: 'INITIAL_AI_SYNTHESIS',
+          triggerReason: 'ONBOARDING_PERSONALIZED_PATH',
+          evidenceSummary: {
+            source: synthesized.source,
+            model: synthesized.model,
+            estimatedTotalWeeks: synthesized.estimatedTotalWeeks,
+            pedagogicalApproach: synthesized.pedagogicalApproach
+          },
+          confidence: 0.95,
           completionPercentage,
           items: {
             create: roadmapItemsData
@@ -233,7 +247,7 @@ export class RoadmapService {
               concept: {
                 include: {
                   skill: true,
-                  lessons: { take: 1 }
+                  lessons: { where: { status: 'PUBLISHED' }, take: 1 }
                 }
               }
             },

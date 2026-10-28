@@ -137,12 +137,19 @@ router.get('/current', requireAuth, async (req, res, next) => {
     const sanitizedRoadmap = {
       id: roadmap.id,
       title: roadmap.title,
+      targetGoal: roadmap.targetGoal,
+      pedagogicalApproach: roadmap.pedagogicalApproach,
       version: roadmap.version,
       status: roadmap.status,
       analysisType: roadmap.analysisType,
       completionPercentage: roadmap.completionPercentage,
       createdAt: roadmap.createdAt,
-      items: sanitizedItems,
+      items: sanitizedItems.map(item => ({
+        ...item,
+        milestoneId: item.milestoneId || item.concept?.slug,
+        title: item.title || item.concept?.name,
+        targetOutcome: item.targetOutcome || item.concept?.description
+      })),
       totalMilestonesCount: roadmap.items.length
     };
 
@@ -155,7 +162,7 @@ router.get('/current', requireAuth, async (req, res, next) => {
 // POST /api/v1/learning-paths/regenerate
 router.post('/regenerate', requireAuth, async (req, res, next) => {
   try {
-    const roadmap = await RoadmapService.generateRoadmap(req.user.id);
+    const roadmap = await RoadmapService.generateRoadmap(req.user.id, { force: true });
     return successResponse(res, { roadmap }, 'Roadmap regenerated successfully');
   } catch (error) {
     next(error);
