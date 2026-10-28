@@ -8,14 +8,14 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className = '', variant = 'primary', size = 'md', isLoading = false, children, disabled, ...props }, ref) => {
-    const baseStyles = 'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98]';
+    const baseStyles = 'inline-flex items-center justify-center rounded-xl border font-semibold transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-signalStrong focus-visible:ring-offset-2 focus-visible:ring-offset-brand-canvas disabled:opacity-45 disabled:pointer-events-none active:scale-[0.98]';
 
     const variants = {
-      primary: 'bg-indigo-600 hover:bg-indigo-700 dark:hover:bg-indigo-500 text-white shadow-sm shadow-indigo-600/20 border border-indigo-500/30',
-      secondary: 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700',
-      outline: 'bg-transparent hover:bg-slate-100 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-300 dark:border-slate-700',
-      ghost: 'bg-transparent hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100',
-      danger: 'bg-rose-50 hover:bg-rose-100 dark:bg-rose-600/20 dark:hover:bg-rose-600/30 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/30'
+      primary: 'bg-brand-ink hover:bg-brand-hover active:bg-black text-brand-signal border-brand-ink shadow-[3px_3px_0_#D8FF19]',
+      secondary: 'bg-brand-signal hover:bg-[#e5ff66] active:bg-[#c5eb00] text-brand-ink border-brand-ink shadow-[3px_3px_0_#111111]',
+      outline: 'bg-brand-paper hover:bg-brand-surface dark:bg-brand-studySurface dark:hover:bg-[#2b2b27] text-brand-ink dark:text-white border-brand-border dark:border-[#3d3d36]',
+      ghost: 'bg-transparent hover:bg-brand-surface dark:hover:bg-white/10 text-brand-muted hover:text-brand-ink dark:text-[#b4b4a9] dark:hover:text-white border-transparent',
+      danger: 'bg-[#fff3f2] hover:bg-[#ffe4e1] dark:bg-[#3a1715] text-brand-error dark:text-[#fca5a5] border-[#f4b8b2] dark:border-[#74352f]'
     };
 
     const sizes = {

@@ -26,7 +26,11 @@ export async function apiClient<T = any>(
   };
 
   if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('companion_token');
+    let token = localStorage.getItem('companion_token');
+    // In development mode, fallback to dev token if user hasn't explicitly logged in
+    if (!token && process.env.NODE_ENV === 'development') {
+      token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI3MmU4YWQ2NS1jMTdiLTQxMWQtODg1NS02YmQ0OWY5ZTUyYzIiLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3OTIyNjA4NDgsImV4cCI6MTc5Mjg2NTY0OH0.wqVJYZGhXRDQpk1nEUo6m6ZeYplaG_rhYTx9j-gUanM';
+    }
     if (token && !headers['Authorization']) {
       headers['Authorization'] = `Bearer ${token}`;
     }

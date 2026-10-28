@@ -12,25 +12,25 @@ interface ThemeContextType {
 }
 
 const ThemeContext = createContext<ThemeContextType>({
-  theme: 'dark',
-  resolvedTheme: 'dark',
+  theme: 'light',
+  resolvedTheme: 'light',
   setTheme: () => {},
   toggleTheme: () => {}
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>('dark');
-  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('dark');
+  const [theme, setThemeState] = useState<Theme>('light');
+  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light');
 
   useEffect(() => {
-    // 1. Load saved theme from localStorage
-    const savedTheme = (localStorage.getItem('companion-theme') as Theme) || 'dark';
+    // 1. Load saved theme from localStorage, default to 'light'
+    const savedTheme = (localStorage.getItem('companion-theme') as Theme) || 'light';
     setThemeState(savedTheme);
 
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
     const applyTheme = (t: Theme) => {
-      let resolved: 'light' | 'dark' = 'dark';
+      let resolved: 'light' | 'dark' = 'light';
       if (t === 'system') {
         resolved = mediaQuery.matches ? 'dark' : 'light';
       } else {
@@ -65,7 +65,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('companion-theme', newTheme);
 
     const root = document.documentElement;
-    let resolved: 'light' | 'dark' = 'dark';
+    let resolved: 'light' | 'dark' = 'light';
     if (newTheme === 'system') {
       const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       resolved = isDark ? 'dark' : 'light';

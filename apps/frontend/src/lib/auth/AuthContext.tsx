@@ -35,7 +35,7 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAdmin: boolean;
-  signin: (credentials: { email: string; password: string }) => Promise<void>;
+  signin: (credentials: { email: string; password: string }) => Promise<User | null>;
   signup: (data: { email: string; password: string; displayName: string }) => Promise<void>;
   signout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -80,6 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (data?.user) {
       setUser(data.user);
     }
+    return data?.user || null;
   };
 
   const signup = async (payload: { email: string; password: string; displayName: string }) => {

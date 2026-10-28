@@ -2,18 +2,21 @@ import React from 'react';
 
 interface BadgeProps {
   children: React.ReactNode;
-  variant?: 'default' | 'success' | 'warning' | 'info' | 'purple';
+  variant?: 'default' | 'success' | 'warning' | 'info' | 'purple' | 'orange' | 'red' | 'blue';
   size?: 'sm' | 'md';
   className?: string;
 }
 
 export function Badge({ children, variant = 'default', size = 'sm', className = '' }: BadgeProps) {
   const variants = {
-    default: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700',
-    success: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50',
-    warning: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800/50',
-    info: 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-800/50',
-    purple: 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800/50'
+    default: 'bg-brand-surface dark:bg-white/10 text-brand-muted dark:text-[#d0d0c5] border-brand-border dark:border-[#3d3d36]',
+    purple: 'bg-brand-signal text-brand-ink border-brand-ink font-bold',
+    success: 'bg-[#edfaef] dark:bg-[#14351e] text-brand-success dark:text-[#86efac] border-[#a7dfb3] dark:border-[#2c6c3b] font-semibold',
+    warning: 'bg-[#fff7e6] dark:bg-[#402a0c] text-brand-warning dark:text-[#fbbf24] border-[#edcc85] dark:border-[#79531b] font-semibold',
+    orange: 'bg-[#fff7e6] dark:bg-[#402a0c] text-brand-warning dark:text-[#fbbf24] border-[#edcc85] dark:border-[#79531b] font-semibold',
+    info: 'bg-[#edf4ff] dark:bg-[#142b4d] text-brand-info dark:text-[#93c5fd] border-[#b9d4ff] dark:border-[#2c5b9b] font-semibold',
+    blue: 'bg-[#edf4ff] dark:bg-[#142b4d] text-brand-info dark:text-[#93c5fd] border-[#b9d4ff] dark:border-[#2c5b9b] font-semibold',
+    red: 'bg-[#fff3f2] dark:bg-[#3a1715] text-brand-error dark:text-[#fca5a5] border-[#f4b8b2] dark:border-[#74352f] font-semibold'
   };
 
   const sizes = {
