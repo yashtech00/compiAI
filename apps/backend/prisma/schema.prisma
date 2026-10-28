@@ -38,6 +38,8 @@ model User {
   subscriptions       Subscription[]
   payments            Payment[]
   recommendationLogs  RecommendationLog[]
+  customConcepts      Concept[]            @relation("UserCustomConcepts")
+  customLessons       Lesson[]             @relation("UserCustomLessons")
 
   @@map("users")
 }
@@ -144,8 +146,11 @@ model RoleSkill {
 
 model Concept {
   id                   String                @id @default(uuid())
-  skillId              String                @map("skill_id")
-  skill                Skill                 @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  skillId              String?               @map("skill_id")
+  skill                Skill?                @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  userId               String?               @map("user_id")
+  user                 User?                 @relation("UserCustomConcepts", fields: [userId], references: [id], onDelete: Cascade)
+  isCustom             Boolean               @default(false) @map("is_custom")
   name                 String
   slug                 String                @unique
   description          String
@@ -168,6 +173,7 @@ model Concept {
   learningPathItems    LearningPathItem[]
   recommendationLogs   RecommendationLog[]
 
+  @@index([userId, isCustom])
   @@map("concepts")
 }
 
@@ -295,6 +301,8 @@ model LearningPath {
   learningGoalId       String?            @map("learning_goal_id")
   learningGoal         LearningGoal?      @relation(fields: [learningGoalId], references: [id], onDelete: Cascade)
   title                String
+  targetGoal           String?            @map("target_goal")
+  pedagogicalApproach  String?            @map("pedagogical_approach")
   status               String             @default("ACTIVE")
   version              Int                @default(1)
   previousPathId       String?            @map("previous_path_id")
@@ -314,17 +322,23 @@ model LearningPath {
 }
 
 model LearningPathItem {
-  id             String       @id @default(uuid())
-  learningPathId String       @map("learning_path_id")
-  learningPath   LearningPath @relation(fields: [learningPathId], references: [id], onDelete: Cascade)
-  conceptId      String       @map("concept_id")
-  concept        Concept      @relation(fields: [conceptId], references: [id], onDelete: Cascade)
-  sequenceOrder  Int          @map("sequence_order")
-  status         String       @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, BLOCKED
-  reason         String?
-  completedAt    DateTime?    @map("completed_at")
+  id               String       @id @default(uuid())
+  learningPathId   String       @map("learning_path_id")
+  learningPath     LearningPath @relation(fields: [learningPathId], references: [id], onDelete: Cascade)
+  conceptId        String?      @map("concept_id")
+  concept          Concept?     @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  milestoneId      String?      @map("milestone_id")
+  title            String?
+  targetOutcome    String?      @map("target_outcome")
+  estimatedMinutes Int?         @default(15) @map("estimated_minutes")
+  metadata         Json?
+  sequenceOrder    Int          @map("sequence_order")
+  status           String       @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, BLOCKED
+  reason           String?
+  completedAt      DateTime?    @map("completed_at")
 
-  @@unique([learningPathId, conceptId])
+  @@unique([learningPathId, sequenceOrder])
+  @@index([learningPathId, conceptId])
   @@map("learning_path_items")
 }
 
@@ -332,6 +346,11 @@ model Lesson {
   id               String            @id @default(uuid())
   conceptId        String            @map("concept_id")
   concept          Concept           @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  userId           String?           @map("user_id")
+  user             User?             @relation("UserCustomLessons", fields: [userId], references: [id], onDelete: Cascade)
+  idempotencyKey   String?           @unique @map("idempotency_key")
+  isAiGenerated    Boolean           @default(false) @map("is_ai_generated")
+  generationModel  String?           @map("generation_model")
   title            String
   slug             String            @unique
   objective        String
@@ -349,6 +368,7 @@ model Lesson {
   aiConversations  AiConversation[]
   recommendationLogs RecommendationLog[]
 
+  @@index([userId, isAiGenerated])
   @@map("lessons")
 }
 
@@ -395,6 +415,7 @@ model Quiz {
   lessonId  String         @map("lesson_id")
   lesson    Lesson         @relation(fields: [lessonId], references: [id], onDelete: Cascade)
   title     String
+  isFrozen  Boolean        @default(true) @map("is_frozen")
   status    String         @default("ACTIVE")
 
   questions QuizQuestion[]
