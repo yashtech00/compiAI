@@ -50,26 +50,18 @@ export default function ProgressPage() {
           setSummary(stats.summary);
           setSkills(stats.skills || []);
         } else if (dashData) {
-          // Fallback reconstruction
+          // Use real telemetry from dashboard without fabricating activity
           setSummary({
             streak: {
-              current: dashData.profile?.streakDays || 1,
-              longest: dashData.profile?.streakDays || 1
+              current: dashData.streak?.current || dashData.profile?.streakDays || 0,
+              longest: dashData.streak?.longest || dashData.profile?.streakDays || 0
             },
-            totalMinutes: 140,
-            completedSessions: 8,
-            conceptsStudied: 12,
-            conceptsMastered: 6,
-            totalXp: dashData.profile?.totalPoints || 350,
-            weeklyActivity: [
-              { day: 'Mon', minutes: 25, sessions: 1 },
-              { day: 'Tue', minutes: 35, sessions: 2 },
-              { day: 'Wed', minutes: 20, sessions: 1 },
-              { day: 'Thu', minutes: 40, sessions: 2 },
-              { day: 'Fri', minutes: 15, sessions: 1 },
-              { day: 'Sat', minutes: 30, sessions: 1 },
-              { day: 'Sun', minutes: 20, sessions: 1 }
-            ]
+            totalMinutes: 0,
+            completedSessions: 0,
+            conceptsStudied: 0,
+            conceptsMastered: 0,
+            totalXp: dashData.profile?.totalPoints || 0,
+            weeklyActivity: []
           });
           setSkills(dashData.skills || []);
         }

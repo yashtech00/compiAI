@@ -7,10 +7,11 @@ import { AiTutorDrawer } from '@/components/tutor/AiTutorDrawer';
 
 interface DashboardShellProps {
   title?: string;
+  conceptName?: string;
   children: React.ReactNode;
 }
 
-export function DashboardShell({ title = 'Overview', children }: DashboardShellProps) {
+export function DashboardShell({ title = 'Overview', conceptName, children }: DashboardShellProps) {
   const [isTutorDrawerOpen, setIsTutorDrawerOpen] = useState(false);
 
   return (
@@ -39,7 +40,7 @@ export function DashboardShell({ title = 'Overview', children }: DashboardShellP
       <AiTutorDrawer
         isOpen={isTutorDrawerOpen}
         onClose={() => setIsTutorDrawerOpen(false)}
-        conceptName="Machine Learning & Deep Learning"
+        conceptName={conceptName || title || 'Learning Companion'}
       />
     </div>
   );

@@ -17,7 +17,7 @@ interface LearningHistoryData {
     concept: { id: string; name: string; skillName: string } | null;
     reason: string;
     lessonSlug: string | null;
-  };
+  } | null;
   completedConcepts: Array<{
     id: string;
     name: string;
@@ -85,35 +85,27 @@ export default function MyLearningPage() {
             }))
         );
 
+        const rec = todayRes?.today?.recommendedActivity || todayRes?.recommendedActivity;
+
         setData({
           summary: {
             completedCount: completed.length,
-            continuityDays: dashRes?.profile?.streakDays || 7,
-            totalStudyHours: Math.round((dashRes?.profile?.totalPoints || 420) / 30),
+            continuityDays: dashRes?.streak?.current || dashRes?.profile?.streakDays || 0,
+            totalStudyHours: Math.round((dashRes?.profile?.totalPoints || 0) / 30),
             needsReinforcementCount: needingWork.length
           },
-          currentFocus: {
-            concept: todayRes?.concept || {
+          currentFocus: rec ? {
+            concept: rec.concept || {
               id: 'c-curr',
-              name: todayRes?.lesson?.title || 'System Design Foundations',
-              skillName: 'System Architecture'
+              name: rec.title || 'Current Milestone',
+              skillName: rec.concept?.skillName || 'Core Learning'
             },
-            reason: todayRes?.recommendationReason || 'Highest value prerequisite for your active learning target.',
-            lessonSlug: todayRes?.lesson?.slug || 'distributed-event-loop'
-          },
-          completedConcepts: completed.length > 0 ? completed : [
-            { id: '1', name: 'Event Loop & Non-Blocking I/O', skillName: 'Backend Core', masteryScore: 94, lastTestedAt: '2026-10-25', attempts: 2, lessonSlug: 'distributed-event-loop' },
-            { id: '2', name: 'Database Indexing Strategies', skillName: 'Data Architecture', masteryScore: 88, lastTestedAt: '2026-10-24', attempts: 3, lessonSlug: 'database-indexing-strategies' },
-            { id: '3', name: 'Consistent Hashing Rings', skillName: 'Distributed Systems', masteryScore: 92, lastTestedAt: '2026-10-23', attempts: 2, lessonSlug: 'consistent-hashing-rings' }
-          ],
-          reinforcementNeeded: needingWork.length > 0 ? needingWork : [
-            { id: '4', name: 'CAP Theorem Boundaries', skillName: 'Distributed Systems', masteryScore: 55, misconceptions: ['Network partitions guarantee availability'], lessonSlug: 'cap-theorem' }
-          ],
-          recentActivities: [
-            { id: 'a-1', conceptName: 'Event Loop & Async Microtasks', skillName: 'Backend Core', activityType: 'Interactive Drill', score: 95, durationMinutes: 18, createdAt: '2026-10-27' },
-            { id: 'a-2', conceptName: 'Distributed Cache Invalidation', skillName: 'System Architecture', activityType: 'Code Sandbox', score: 85, durationMinutes: 24, createdAt: '2026-10-26' },
-            { id: 'a-3', conceptName: 'Write-Heavy Database Sharding', skillName: 'Data Architecture', activityType: 'Diagnostic Quiz', score: 90, durationMinutes: 15, createdAt: '2026-10-25' }
-          ]
+            reason: rec.reason || 'Next recommended milestone in your individualized path.',
+            lessonSlug: rec.lessonSlug || null
+          } : null,
+          completedConcepts: completed,
+          reinforcementNeeded: needingWork,
+          recentActivities: []
         });
       } catch (err) {
         console.error('Failed to load learning history:', err);
@@ -180,7 +172,7 @@ export default function MyLearningPage() {
         </div>
 
         {/* 1. Current Learning Focus */}
-        {focus.concept ? (
+        {focus?.concept ? (
           <div className="p-5 sm:p-6 rounded-[24px] bg-white border border-[#d9d9d2] shadow-sm relative overflow-hidden">
             <div className="absolute top-0 right-0 w-64 h-64 bg-[#d8ff19]/15 rounded-full blur-3xl pointer-events-none" />
             <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -211,10 +203,10 @@ export default function MyLearningPage() {
                     </button>
                   </Link>
                 )}
-                <Link href="/problem">
+                <Link href="/today">
                   <button className="px-6 py-3 rounded-full bg-[#111111] hover:bg-black text-[#d8ff19] font-black text-xs sm:text-sm flex items-center gap-2 shadow-sm hover:scale-105 active:scale-95 transition-all">
                     <ArrowRight className="w-4 h-4" />
-                    <span>Today&apos;s Challenge</span>
+                    <span>Today&apos;s Learning</span>
                   </button>
                 </Link>
               </div>
@@ -229,16 +221,16 @@ export default function MyLearningPage() {
                   No Active Session Yet
                 </span>
                 <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
-                  Start Today&apos;s Problem
+                  Start Today&apos;s Learning
                 </h2>
                 <p className="text-xs sm:text-sm text-white/60 mt-1.5 max-w-xl leading-relaxed">
-                  Jump into your first problem-first engineering simulation. Each challenge adapts to your skill level and selected goal.
+                  Begin with your personalized daily lesson. Each milestone adapts to your skill level and selected goal.
                 </p>
               </div>
-              <Link href="/problem" className="shrink-0">
+              <Link href="/today" className="shrink-0">
                 <button className="px-6 py-3 rounded-full bg-[#d8ff19] hover:bg-[#c5ec00] text-[#111111] font-black text-xs sm:text-sm flex items-center gap-2 shadow-sm hover:scale-105 active:scale-95 transition-all">
                   <ArrowRight className="w-4 h-4" />
-                  <span>Start Challenge</span>
+                  <span>Start Learning</span>
                 </button>
               </Link>
             </div>

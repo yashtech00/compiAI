@@ -40,12 +40,28 @@ class ScenarioRegistryService {
     }
   }
 
+  normalizeGoalId(goalId) {
+    if (!goalId || typeof goalId !== 'string') return goalId;
+    const map = {
+      'full-stack-developer': 'full-stack-development',
+      'fullstack-developer': 'full-stack-development',
+      'fullstack-development': 'full-stack-development',
+      'backend-developer': 'backend-development',
+      'frontend-developer': 'full-stack-development',
+      'ai-developer': 'ai-engineer',
+      'ai-engineering': 'ai-engineer'
+    };
+    return map[goalId] || goalId;
+  }
+
   getDiagnosticByGoal(goalId) {
-    return this.diagnostics.get(`goal:${goalId}`) || null;
+    const normalized = this.normalizeGoalId(goalId);
+    return this.diagnostics.get(`goal:${normalized}`) || this.diagnostics.get(`goal:${goalId}`) || null;
   }
 
   getMainProblem(scenarioId) {
-    return this.mainProblems.get(scenarioId) || this.mainProblems.get(`goal:${scenarioId}`) || null;
+    const normalized = this.normalizeGoalId(scenarioId);
+    return this.mainProblems.get(scenarioId) || this.mainProblems.get(`goal:${normalized}`) || this.mainProblems.get(`goal:${scenarioId}`) || null;
   }
 
   getMiniSimulation(scenarioIdOrSkill) {
@@ -53,7 +69,8 @@ class ScenarioRegistryService {
   }
 
   getFinalAssessment(assessmentIdOrGoal) {
-    return this.finalAssessments.get(assessmentIdOrGoal) || this.finalAssessments.get(`goal:${assessmentIdOrGoal}`) || null;
+    const normalized = this.normalizeGoalId(assessmentIdOrGoal);
+    return this.finalAssessments.get(assessmentIdOrGoal) || this.finalAssessments.get(`goal:${normalized}`) || this.finalAssessments.get(`goal:${assessmentIdOrGoal}`) || null;
   }
 
   /**

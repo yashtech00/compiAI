@@ -49,17 +49,32 @@ class MasterPathRegistryService {
    * @param {string} version 'latest' or semantic version
    * @returns {Object|null}
    */
+  normalizeGoalId(goalId) {
+    if (!goalId || typeof goalId !== 'string') return goalId;
+    const map = {
+      'full-stack-developer': 'full-stack-development',
+      'fullstack-developer': 'full-stack-development',
+      'fullstack-development': 'full-stack-development',
+      'backend-developer': 'backend-development',
+      'frontend-developer': 'full-stack-development',
+      'ai-developer': 'ai-engineer',
+      'ai-engineering': 'ai-engineer'
+    };
+    return map[goalId] || goalId;
+  }
+
   getMasterPath(goalId, version = 'latest') {
     this.init();
 
+    const normalizedGoalId = this.normalizeGoalId(goalId);
     const resolvedVersion = version === 'latest' 
-      ? this.latestVersions.get(goalId) 
+      ? (this.latestVersions.get(normalizedGoalId) || this.latestVersions.get(goalId))
       : version;
 
     if (!resolvedVersion) return null;
 
-    const key = `${goalId}:${resolvedVersion}`;
-    return this.registry.get(key) || null;
+    const key = `${normalizedGoalId}:${resolvedVersion}`;
+    return this.registry.get(key) || this.registry.get(`${goalId}:${resolvedVersion}`) || null;
   }
 
   /**

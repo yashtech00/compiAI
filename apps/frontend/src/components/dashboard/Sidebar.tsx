@@ -4,7 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth/AuthContext';
-import { Layers, Repeat, TrendingUp, HelpCircle, LogOut, Terminal } from 'lucide-react';
+import { Layers, Repeat, TrendingUp, HelpCircle, LogOut, Terminal, Sparkles } from 'lucide-react';
 
 interface SidebarProps {
   onOpenHelp?: () => void;
@@ -15,8 +15,9 @@ export function Sidebar({ onOpenHelp }: SidebarProps) {
   const { signout } = useAuth();
 
   const navItems = [
-    { href: '/problem', label: 'Problem-First Track (Main)', icon: Terminal, match: pathname === '/problem' || pathname === '/today' || pathname === '/dashboard' },
-    { href: '/my-learning', label: 'My Learning Paths', icon: Layers, match: pathname === '/my-learning' },
+    { href: '/today', label: "Today's Learning", icon: Sparkles, match: pathname === '/today' || pathname === '/dashboard' },
+    { href: '/my-learning', label: 'My Learning Paths', icon: Layers, match: pathname === '/my-learning' || pathname === '/roadmap' },
+    { href: '/problem', label: 'Interactive Problem Track', icon: Terminal, match: pathname === '/problem' },
     { href: '/recall', label: 'Spaced Recall', icon: Repeat, match: pathname === '/recall' },
     { href: '/progress', label: 'Progress & Mastery', icon: TrendingUp, match: pathname === '/progress' },
   ];
@@ -27,7 +28,7 @@ export function Sidebar({ onOpenHelp }: SidebarProps) {
       <div className="flex flex-col items-center gap-4 sm:gap-5 w-full">
         {/* Waveform Abstract Logo */}
         <Link
-          href="/problem"
+          href="/today"
           className="flex items-center justify-center p-1.5 rounded-xl hover:scale-105 transition-transform"
           title="AI Learning Companion"
         >

@@ -8,6 +8,7 @@ import { LessonStageNav } from '@/components/lessons/LessonStageNav';
 import { StageRenderer } from '@/components/lessons/StageRenderer';
 import { SessionCompletedView } from '@/components/lessons/SessionCompletedView';
 import { AiTutorDrawer } from '@/components/tutor/AiTutorDrawer';
+import { DashboardShell } from '@/components/dashboard/DashboardShell';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 
@@ -247,46 +248,55 @@ export default function LessonPlayerPage({ params }: { params?: { slug?: string 
 
   if (isLoading) {
     return (
-      <div className="flex-1 flex items-center justify-center p-8 min-h-[60vh]">
-        <div className="text-center text-[#686860]">
-          <div className="animate-spin w-9 h-9 border-3 border-[#111111] border-t-transparent rounded-full mx-auto mb-3.5" />
-          <p className="text-sm font-bold text-[#111111]">Preparing today&apos;s adaptive session...</p>
+      <DashboardShell title="Daily Lesson">
+        <div className="flex-1 flex items-center justify-center p-8 min-h-[60vh]">
+          <div className="text-center text-[#686860]">
+            <div className="animate-spin w-9 h-9 border-3 border-[#111111] border-t-transparent rounded-full mx-auto mb-3.5" />
+            <p className="text-sm font-bold text-[#111111]">Preparing today&apos;s adaptive session...</p>
+          </div>
         </div>
-      </div>
+      </DashboardShell>
     );
   }
 
   if (!lesson) {
     return (
-      <div className="flex-1 flex items-center justify-center p-8 min-h-[60vh]">
-        <Card className="text-center p-8 max-w-md bg-white border border-[#E7E7E7] shadow-sm">
-          <h2 className="text-lg font-bold text-[#171717] mb-2">Lesson Not Found</h2>
-          <p className="text-xs text-[#626262] mb-6">
-            We couldn&apos;t retrieve the requested milestone. It may still be generating or archived.
-          </p>
-          <Button onClick={() => router.push('/problem')}>Back to Problem Workspace</Button>
-        </Card>
-      </div>
+      <DashboardShell title="Daily Lesson">
+        <div className="flex-1 flex items-center justify-center p-8 min-h-[60vh]">
+          <Card className="text-center p-8 max-w-md bg-white border border-[#E7E7E7] shadow-sm">
+            <h2 className="text-lg font-bold text-[#171717] mb-2">Lesson Not Found</h2>
+            <p className="text-xs text-[#626262] mb-6">
+              We couldn&apos;t retrieve the requested milestone. It may still be generating or archived.
+            </p>
+            <Button onClick={() => router.push('/today')}>Back to Today&apos;s Learning</Button>
+          </Card>
+        </div>
+      </DashboardShell>
     );
   }
 
   // Session Completed State
   if (isCompleted) {
     return (
-      <SessionCompletedView
-        conceptName={lesson.concept.name}
-        earnedXp={earnedXp}
-        quizResult={quizResult}
-        onReturnToToday={() => router.push('/problem')}
-      />
+      <DashboardShell title="Lesson Completed" conceptName={lesson.concept.name}>
+        <SessionCompletedView
+          conceptName={lesson.concept.name}
+          earnedXp={earnedXp}
+          quizResult={quizResult}
+          onReturnToToday={() => router.push('/today')}
+        />
+      </DashboardShell>
     );
   }
 
   const currentStageTitle = STAGE_TITLES[currentStageNumber] || 'Learning Milestone';
 
   return (
-    <div className="min-h-screen bg-white text-[#171717] flex flex-col">
-      <main className="flex-1 flex flex-col max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 w-full">
+    <DashboardShell
+      title={lesson.concept?.skill?.name || lesson.concept.name || 'Daily Lesson'}
+      conceptName={lesson.concept.name}
+    >
+      <div className="flex-1 flex flex-col max-w-4xl mx-auto px-2 sm:px-4 lg:px-6 py-4 w-full">
         {/* Consistent Lesson Header */}
         <LessonHeader
           skillName={lesson.concept?.skill?.name}
@@ -347,7 +357,7 @@ export default function LessonPlayerPage({ params }: { params?: { slug?: string 
           lessonId={lesson.id}
           conceptName={lesson.concept.name}
         />
-      </main>
-    </div>
+      </div>
+    </DashboardShell>
   );
 }

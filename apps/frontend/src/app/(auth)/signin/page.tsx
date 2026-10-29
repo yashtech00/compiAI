@@ -41,7 +41,7 @@ export default function SigninPage() {
       if (authenticatedUser?.role === 'ADMIN') {
         router.push('/admin');
       } else {
-        router.push('/problem');
+        router.push('/today');
       }
     } catch (err: any) {
       setError(err?.message || 'Invalid email or password.');

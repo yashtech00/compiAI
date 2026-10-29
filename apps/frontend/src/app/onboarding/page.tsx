@@ -25,6 +25,8 @@ export default function OnboardingPage() {
   const [knownSkills, setKnownSkills] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchInitialData() {
@@ -116,6 +118,27 @@ export default function OnboardingPage() {
     return (
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="animate-spin w-8 h-8 border-2 border-[#111111] border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  if (isGenerating) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center px-4 py-16 max-w-md mx-auto text-center">
+        <div className="w-16 h-16 rounded-3xl bg-[#d8ff19]/30 border border-[#111111]/20 flex items-center justify-center mb-6 shadow-sm">
+          <Sparkles className="w-8 h-8 text-[#111111] animate-pulse" />
+        </div>
+        <h2 className="text-xl sm:text-2xl font-black text-[#111111] tracking-tight mb-2">
+          Calibrating Your Personalized Path
+        </h2>
+        <p className="text-xs sm:text-sm text-[#686860] mb-6 leading-relaxed font-medium">
+          Our curriculum architect is synthesizing your prerequisite graph and milestones for{' '}
+          <span className="font-bold text-[#111111]">{selectedRole?.name || goalTitle}</span>.
+        </p>
+        <div className="flex items-center gap-2.5 text-xs font-bold text-[#111111] bg-[#F8F8F4] px-4 py-2.5 rounded-full border border-[#d9d9d2]">
+          <div className="animate-spin w-3.5 h-3.5 border-2 border-[#111111] border-t-transparent rounded-full" />
+          Setting up Today&apos;s Learning session...
+        </div>
       </div>
     );
   }
@@ -349,69 +372,83 @@ export default function OnboardingPage() {
               <ArrowRight className="w-4 h-4" />
             </Button>
           ) : (
-            <div className="flex flex-col sm:flex-row gap-2.5 w-full sm:w-auto">
-              <Button
-                variant="outline"
-                size="md"
-                isLoading={isSaving}
-                onClick={async () => {
-                  setIsSaving(true);
-                  try {
-                    await apiClient('/onboarding/step', {
-                      method: 'POST',
-                      body: JSON.stringify({
-                        step: 3,
-                        goalTitle,
-                        targetRoleId: selectedRole?.id,
-                        experienceLevel,
-                        dailyMinutes,
-                        knownSkillSlugs: knownSkills
-                      })
-                    });
-                    await apiClient('/onboarding/complete', { method: 'POST' });
-                    const goalId = selectedRole?.slug || selectedRole?.id || 'system-design';
-                    router.push(`/problem?goalId=${goalId}`);
-                  } catch (err) {
-                    console.error('Error completing onboarding:', err);
-                  } finally {
-                    setIsSaving(false);
-                  }
-                }}
-                className="gap-1.5 text-xs order-2 sm:order-1 border-[#d9d9d2] text-[#111111] hover:bg-[#F1F1EC] font-bold"
-              >
-                Quick Diagnostic (2 min)
-              </Button>
-              <Button
-                size="md"
-                isLoading={isSaving}
-                onClick={async () => {
-                  setIsSaving(true);
-                  try {
-                    await apiClient('/onboarding/step', {
-                      method: 'POST',
-                      body: JSON.stringify({
-                        step: 3,
-                        goalTitle,
-                        targetRoleId: selectedRole?.id,
-                        experienceLevel,
-                        dailyMinutes,
-                        knownSkillSlugs: knownSkills
-                      })
-                    });
-                    await apiClient('/onboarding/complete', { method: 'POST' });
-                    const goalId = selectedRole?.slug || selectedRole?.id || 'system-design';
-                    router.push(`/problem?goalId=${goalId}`);
-                  } catch (err) {
-                    console.error('Error completing onboarding:', err);
-                  } finally {
-                    setIsSaving(false);
-                  }
-                }}
-                className="gap-1.5 order-1 sm:order-2 bg-[#111111] hover:bg-black text-[#d8ff19] font-bold shadow-sm"
-              >
-                Start Daily Learning
-                <ArrowRight className="w-4 h-4" />
-              </Button>
+            <div className="flex flex-col gap-3 w-full sm:w-auto">
+              {generationError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600 font-medium">
+                  {generationError}
+                </div>
+              )}
+              <div className="flex flex-col sm:flex-row gap-2.5 w-full sm:w-auto">
+                <Button
+                  variant="outline"
+                  size="md"
+                  isLoading={isSaving}
+                  onClick={async () => {
+                    setIsSaving(true);
+                    setGenerationError(null);
+                    try {
+                      await apiClient('/onboarding/step', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                          step: 3,
+                          goalTitle,
+                          targetRoleId: selectedRole?.id,
+                          experienceLevel,
+                          dailyMinutes,
+                          knownSkillSlugs: knownSkills
+                        })
+                      });
+                      setIsGenerating(true);
+                      await apiClient('/onboarding/complete', { method: 'POST' });
+                      const goalId = selectedRole?.slug || selectedRole?.id || 'system-design';
+                      router.push(`/problem?goalId=${goalId}&mode=diagnostic`);
+                    } catch (err: any) {
+                      console.error('Error completing onboarding with diagnostic:', err);
+                      setGenerationError(err?.message || 'Failed to complete path setup. Please retry.');
+                      setIsGenerating(false);
+                    } finally {
+                      setIsSaving(false);
+                    }
+                  }}
+                  className="gap-1.5 text-xs order-2 sm:order-1 border-[#d9d9d2] text-[#111111] hover:bg-[#F1F1EC] font-bold"
+                >
+                  Quick Diagnostic (2 min)
+                </Button>
+                <Button
+                  size="md"
+                  isLoading={isSaving || isGenerating}
+                  onClick={async () => {
+                    setIsSaving(true);
+                    setGenerationError(null);
+                    try {
+                      await apiClient('/onboarding/step', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                          step: 3,
+                          goalTitle,
+                          targetRoleId: selectedRole?.id,
+                          experienceLevel,
+                          dailyMinutes,
+                          knownSkillSlugs: knownSkills
+                        })
+                      });
+                      setIsGenerating(true);
+                      await apiClient('/onboarding/complete', { method: 'POST' });
+                      router.push('/today');
+                    } catch (err: any) {
+                      console.error('Error completing onboarding:', err);
+                      setGenerationError(err?.message || 'Failed to initialize your learning session. Please click Retry.');
+                      setIsGenerating(false);
+                    } finally {
+                      setIsSaving(false);
+                    }
+                  }}
+                  className="gap-1.5 order-1 sm:order-2 bg-[#111111] hover:bg-black text-[#d8ff19] font-bold shadow-sm"
+                >
+                  Start Daily Learning
+                  <ArrowRight className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
           )}
         </div>

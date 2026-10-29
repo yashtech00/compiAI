@@ -47,8 +47,15 @@ function ProblemWorkspaceContent() {
         const goalRes = await apiClient('/goals/current');
         if (goalRes?.goal) {
           // Use targetRole slug if available, else derive from title
-          const slug = goalRes.goal.targetRole?.slug || null;
-          setResolvedGoalId(slug || 'system-design');
+          const rawSlug = goalRes.goal.targetRole?.slug || null;
+          const slugMap: Record<string, string> = {
+            'full-stack-developer': 'full-stack-development',
+            'backend-developer': 'backend-development',
+            'ai-engineer': 'ai-engineer',
+            'system-design': 'system-design'
+          };
+          const resolved = rawSlug ? (slugMap[rawSlug] || rawSlug) : 'system-design';
+          setResolvedGoalId(resolved);
           if (goalRes.goal.targetRole?.name) setResolvedGoalName(goalRes.goal.targetRole.name);
         } else {
           setResolvedGoalId('system-design');

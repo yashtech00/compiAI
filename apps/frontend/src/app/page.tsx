@@ -16,7 +16,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!isLoading && user) {
-      router.replace('/problem');
+      router.replace('/today');
     }
   }, [user, isLoading, router]);
 

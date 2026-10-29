@@ -7,7 +7,7 @@ export default function DashboardPage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace('/problem');
+    router.replace('/today');
   }, [router]);
 
   return (

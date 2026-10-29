@@ -15,6 +15,7 @@ import aiRoutes from '../modules/ai/ai.routes.js';
 import subscriptionsRoutes from '../modules/subscriptions/subscriptions.routes.js';
 import adminRoutes from '../modules/admin/admin.routes.js';
 import simulationsRoutes from '../modules/simulations/simulation.routes.js';
+import dashboardRoutes from '../modules/dashboard/dashboard.routes.js';
 import { successResponse } from '../utils/response.js';
 
 const apiRouter = Router();
@@ -65,6 +66,8 @@ apiRouter.use('/', goalsRoutes); // /roles and /goals
 apiRouter.use('/assessments', assessmentsRoutes);
 apiRouter.use('/learning-paths', learningPathsRoutes);
 apiRouter.use('/today', recommendationsRoutes);
+apiRouter.use('/daily', recommendationsRoutes);
+apiRouter.use('/dashboard', dashboardRoutes);
 apiRouter.use('/lessons', lessonsRoutes);
 apiRouter.use('/sessions', sessionsRoutes);
 apiRouter.use('/quizzes', quizzesRoutes);
